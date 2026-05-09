@@ -26,6 +26,7 @@ import {
 const TASKS_UPDATED_EVENT = "tasks-updated";
 const FLOATING_POSITION_KEY = "floating-panel-position";
 const HITOKOTO_ENDPOINT = "https://v1.hitokoto.cn/?c=f&encode=text";
+const AUTO_UPDATE_CHECK_DELAY = 3500;
 const WeekView = lazy(() => import("./components/week-view").then((module) => ({ default: module.WeekView })));
 const MonthView = lazy(() => import("./components/month-view").then((module) => ({ default: module.MonthView })));
 const StatsPanel = lazy(() => import("./components/stats-panel").then((module) => ({ default: module.StatsPanel })));
@@ -363,8 +364,10 @@ export default function App() {
     await message("示例任务已经载入。", { title: "初始化完成", kind: "info" });
   }, [refreshData, notifyTasksUpdated]);
 
-  const handleCheckUpdates = useCallback(async () => {
-    setIsCheckingUpdates(true);
+  const checkForUpdates = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsCheckingUpdates(true);
+    }
 
     try {
       const [{ check }, { relaunch }] = await Promise.all([
@@ -374,7 +377,9 @@ export default function App() {
       const update = await check();
 
       if (!update) {
-        await message("当前已经是最新版本。", { title: "检查更新", kind: "info" });
+        if (!silent) {
+          await message("当前已经是最新版本。", { title: "检查更新", kind: "info" });
+        }
         return;
       }
 
@@ -393,11 +398,33 @@ export default function App() {
       await message("更新安装完成，应用将自动重启。", { title: "更新完成", kind: "info" });
       await relaunch();
     } catch (error) {
-      await message(getErrorMessage(error, "检查更新失败"), { title: "检查更新失败", kind: "error" });
+      if (!silent) {
+        await message(getErrorMessage(error, "检查更新失败"), { title: "检查更新失败", kind: "error" });
+      }
     } finally {
-      setIsCheckingUpdates(false);
+      if (!silent) {
+        setIsCheckingUpdates(false);
+      }
     }
   }, []);
+
+  const handleCheckUpdates = useCallback(async () => {
+    await checkForUpdates(false);
+  }, [checkForUpdates]);
+
+  useEffect(() => {
+    if (isFloatingWindow) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void checkForUpdates(true);
+    }, AUTO_UPDATE_CHECK_DELAY);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [checkForUpdates, isFloatingWindow]);
 
   const moveFloatingWindowToCorner = useCallback(async (floatingWindow: WebviewWindow) => {
     const [monitorList, activeMonitor] = await Promise.all([
