@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>我的待办</title>
+    <style>
+      :root {
+        color-scheme: light;
+        background: transparent;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      .boot-shell {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        background: transparent;
+        border-radius: 18px;
+        overflow: hidden;
+      }
+
+      .boot-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid #ebecef;
+        border-radius: 18px;
+        background: #fff;
+      }
+
+      .boot-titlebar {
+        display: flex;
+        height: 36px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 6px 0 12px;
+        border-bottom: 1px solid #ebecef;
+        background: rgba(255, 255, 255, 0.96);
+      }
+
+      .boot-titlebar-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .boot-titlebar-logo {
+        width: 20px;
+        height: 20px;
+        border-radius: 7px;
+        background: linear-gradient(180deg, #ff7a7a 0%, #ff6666 100%);
+        position: relative;
+      }
+
+      .boot-titlebar-logo::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 4px;
+        background: white;
+      }
+
+      .boot-titlebar-text {
+        width: 64px;
+        height: 12px;
+      }
+
+      .boot-titlebar-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .boot-titlebar-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+      }
+
+      .boot-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid #ebecef;
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .boot-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .boot-logo {
+        width: 32px;
+        height: 32px;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #ff7a7a 0%, #ff6666 100%);
+        position: relative;
+      }
+
+      .boot-logo::after {
+        content: "";
+        position: absolute;
+        inset: 8px;
+        border-radius: 6px;
+        background: white;
+      }
+
+      .boot-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .boot-line {
+        border-radius: 999px;
+        background: linear-gradient(90deg, #eceef2 25%, #f5f6f8 37%, #eceef2 63%);
+        background-size: 400% 100%;
+        animation: boot-shimmer 1.35s ease infinite;
+      }
+
+      .boot-title {
+        width: 96px;
+        height: 16px;
+      }
+
+      .boot-subtitle {
+        width: 132px;
+        height: 10px;
+      }
+
+      .boot-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .boot-toggle {
+        width: 312px;
+        height: 54px;
+        border: 1px solid #e6e7eb;
+        border-radius: 18px;
+        background: white;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+      }
+
+      .boot-button {
+        width: 104px;
+        height: 40px;
+        border-radius: 14px;
+        background: #ff6b6b;
+      }
+
+      .boot-content {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .boot-column {
+        flex: 1;
+        padding: 16px 18px;
+      }
+
+      .boot-date {
+        width: 220px;
+        height: 18px;
+        margin-bottom: 18px;
+      }
+
+      .boot-group {
+        margin-bottom: 18px;
+      }
+
+      .boot-group-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .boot-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #ff6b6b;
+      }
+
+      .boot-group-title {
+        width: 72px;
+        height: 12px;
+      }
+
+      .boot-divider {
+        flex: 1;
+        height: 1px;
+        background: #eaecf0;
+      }
+
+      .boot-card {
+        height: 92px;
+        border-radius: 22px;
+        background: white;
+        border: 1px solid #ebecef;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+      }
+
+      .boot-sidebar {
+        width: 260px;
+        border-left: 1px solid #ebecef;
+        padding: 16px 14px;
+        background: rgba(255, 255, 255, 0.95);
+      }
+
+      .boot-sidebar-title {
+        width: 84px;
+        height: 16px;
+        margin-bottom: 14px;
+      }
+
+      .boot-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .boot-stat-card,
+      .boot-panel {
+        border-radius: 22px;
+        border: 1px solid #ebecef;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 250, 252, 0.96));
+      }
+
+      .boot-stat-card {
+        height: 98px;
+      }
+
+      .boot-panel {
+        height: 178px;
+        margin-bottom: 12px;
+      }
+
+      @keyframes boot-shimmer {
+        0% {
+          background-position: 100% 50%;
+        }
+
+        100% {
+          background-position: 0 50%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-shell" aria-hidden="true">
+        <div class="boot-main">
+          <div class="boot-titlebar">
+            <div class="boot-titlebar-brand">
+              <div class="boot-titlebar-logo"></div>
+              <div class="boot-line boot-titlebar-text"></div>
+            </div>
+            <div class="boot-titlebar-actions">
+              <div class="boot-line boot-titlebar-btn"></div>
+              <div class="boot-line boot-titlebar-btn"></div>
+              <div class="boot-line boot-titlebar-btn"></div>
+            </div>
+          </div>
+          <div class="boot-header">
+            <div class="boot-brand">
+              <div class="boot-logo"></div>
+              <div class="boot-copy">
+                <div class="boot-line boot-title"></div>
+                <div class="boot-line boot-subtitle"></div>
+              </div>
+            </div>
+            <div class="boot-actions">
+              <div class="boot-toggle"></div>
+              <div class="boot-button"></div>
+            </div>
+          </div>
+          <div class="boot-content">
+            <div class="boot-column">
+              <div class="boot-line boot-date"></div>
+
+              <div class="boot-group">
+                <div class="boot-group-head">
+                  <div class="boot-dot"></div>
+                  <div class="boot-line boot-group-title"></div>
+                  <div class="boot-divider"></div>
+                </div>
+                <div class="boot-card"></div>
+              </div>
+
+              <div class="boot-group">
+                <div class="boot-group-head">
+                  <div class="boot-dot"></div>
+                  <div class="boot-line boot-group-title"></div>
+                  <div class="boot-divider"></div>
+                </div>
+                <div class="boot-card"></div>
+              </div>
+
+              <div class="boot-group">
+                <div class="boot-group-head">
+                  <div class="boot-dot"></div>
+                  <div class="boot-line boot-group-title"></div>
+                  <div class="boot-divider"></div>
+                </div>
+                <div class="boot-card" style="height: 72px;"></div>
+              </div>
+            </div>
+
+            <div class="boot-sidebar">
+              <div class="boot-line boot-sidebar-title"></div>
+              <div class="boot-stats">
+                <div class="boot-stat-card"></div>
+                <div class="boot-stat-card"></div>
+              </div>
+              <div class="boot-panel"></div>
+              <div class="boot-panel" style="height: 146px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+  </html>

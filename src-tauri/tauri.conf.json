@@ -1,0 +1,53 @@
+{
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "productName": "ToList Desktop",
+  "version": "0.1.0",
+  "identifier": "com.xiaoxuan.tolistdesktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEwNUNGNjRFMjU1MjI5QkIKUldTN0tWSWxUdlpjb0lqQVJZUUZCRWpXZ09XVTYyWnBiak9yN2hxWG9YaUZJU1RNY0UrbGZVSXYK",
+      "endpoints": [
+        "https://github.com/ABC-xiaoxuan/Tolist2.0/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    },
+    "sql": {
+      "preload": ["sqlite:tasks.db"]
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "我的待办",
+        "width": 960,
+        "height": 660,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": true,
+        "shadow": false,
+        "decorations": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico", "icons/icon.png"]
+  }
+}
