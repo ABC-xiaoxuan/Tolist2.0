@@ -20,7 +20,7 @@ if (!(Test-Path $signaturePath)) {
   throw "Updater signature not found: $signaturePath"
 }
 
-$encodedInstallerName = $installerName -replace " ", "%20"
+$githubInstallerName = $installerName -replace " ", "."
 $signature = (Get-Content $signaturePath -Raw).Trim()
 $latest = [ordered]@{
   version = $version
@@ -29,7 +29,7 @@ $latest = [ordered]@{
   platforms = [ordered]@{
     "windows-x86_64" = [ordered]@{
       signature = $signature
-      url = "https://github.com/$repo/releases/latest/download/$encodedInstallerName"
+      url = "https://github.com/$repo/releases/latest/download/$githubInstallerName"
     }
   }
 }
