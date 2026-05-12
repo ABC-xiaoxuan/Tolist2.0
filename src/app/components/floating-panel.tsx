@@ -105,6 +105,18 @@ function rgbaFromHex(hex: string, alpha: number) {
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
+function mixHexWithWhite(hex: string, whiteRatio: number) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return "#f8fafc";
+  }
+
+  const mix = (channel: number) => Math.round(channel * (1 - whiteRatio) + 255 * whiteRatio);
+  const toHex = (channel: number) => mix(channel).toString(16).padStart(2, "0");
+
+  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
+}
+
 interface FloatingPanelProps {
   tasks: Task[];
   completedCount: number;
@@ -156,7 +168,22 @@ export function FloatingPanel({
     const savedValue = window.localStorage.getItem(FLOATING_PINNED_KEY);
     return savedValue === null ? true : savedValue === "true";
   });
+  const [shouldRenderContent, setShouldRenderContent] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+
+    return window.localStorage.getItem(FLOATING_COLLAPSED_KEY) !== "true";
+  });
+  const [isContentVisible, setIsContentVisible] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+
+    return window.localStorage.getItem(FLOATING_COLLAPSED_KEY) !== "true";
+  });
   const sizeAnimationRef = useRef<number | null>(null);
+  const contentAnimationFrameRef = useRef<number | null>(null);
   const positionSaveTimerRef = useRef<number | null>(null);
   const queuedPositionRef = useRef<FloatingPoint | null>(null);
   const lastPositionSaveRef = useRef(0);
@@ -185,10 +212,10 @@ export function FloatingPanel({
           ...presetTheme,
           accent: customAccent,
           border: rgbaFromHex(customAccent, 0.34),
-          headerBg: rgbaFromHex(customAccent, 0.12),
-          panelStart: rgbaFromHex(customAccent, 0.08),
-          panelEnd: rgbaFromHex(customAccent, 0.16),
-          surfaceAlt: rgbaFromHex(customAccent, 0.14),
+          headerBg: mixHexWithWhite(customAccent, 0.86),
+          panelStart: mixHexWithWhite(customAccent, 0.93),
+          panelEnd: mixHexWithWhite(customAccent, 0.86),
+          surfaceAlt: mixHexWithWhite(customAccent, 0.9),
           progressBg: rgbaFromHex(customAccent, 0.28),
         }
       : presetTheme;
@@ -222,7 +249,7 @@ export function FloatingPanel({
     const targetSize = isCollapsed
       ? new PhysicalSize(268, 44)
       : new PhysicalSize(320, onlyPending ? 460 : 500);
-    const duration = isCollapsed ? 140 : 220;
+    const duration = isCollapsed ? 180 : 380;
     let cancelled = false;
 
     void currentWindow
@@ -273,6 +300,39 @@ export function FloatingPanel({
       }
     };
   }, [isCollapsed, onlyPending]);
+
+  useEffect(() => {
+    if (contentAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(contentAnimationFrameRef.current);
+      contentAnimationFrameRef.current = null;
+    }
+
+    if (!isCollapsed) {
+      setShouldRenderContent(true);
+      contentAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        contentAnimationFrameRef.current = window.requestAnimationFrame(() => {
+          setIsContentVisible(true);
+          contentAnimationFrameRef.current = null;
+        });
+      });
+
+      return () => {
+        if (contentAnimationFrameRef.current !== null) {
+          window.cancelAnimationFrame(contentAnimationFrameRef.current);
+          contentAnimationFrameRef.current = null;
+        }
+      };
+    }
+
+    setIsContentVisible(false);
+    const timeoutId = window.setTimeout(() => {
+      setShouldRenderContent(false);
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isCollapsed]);
 
   useEffect(() => {
     window.localStorage.setItem(FLOATING_COLLAPSED_KEY, String(isCollapsed));
@@ -357,14 +417,13 @@ export function FloatingPanel({
   };
 
   return (
-    <div className={`flex size-full ${isCollapsed ? "p-0" : "p-3"}`}>
+    <div className="flex size-full p-0">
       <div
-        className={`flex flex-1 flex-col overflow-hidden rounded-[28px] text-slate-900 backdrop-blur-xl ${
-          isCollapsed ? "" : "drop-shadow-[0_8px_32px_rgba(15,23,42,0.20)]"
-        }`}
+        className="flex flex-1 flex-col overflow-hidden rounded-[24px] text-slate-900"
         style={{
           border: `1px solid ${theme.border}`,
           backgroundImage: `linear-gradient(180deg, ${theme.panelStart} 0%, ${theme.panelEnd} 100%)`,
+          boxShadow: isCollapsed ? "none" : "inset 0 1px 0 rgba(255,255,255,0.65)",
         }}
       >
       <div
@@ -500,10 +559,14 @@ export function FloatingPanel({
           </div>
         )}
 
-        {!isCollapsed && (
+        {shouldRenderContent && (
           <div
             key="floating-content"
-            className="flex min-h-0 flex-1 flex-col overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
+            className={`flex min-h-0 flex-1 origin-top flex-col overflow-hidden transition-[opacity,transform,filter] duration-300 ease-out ${
+              isContentVisible
+                ? "translate-y-0 scale-100 opacity-100 blur-0"
+                : "pointer-events-none -translate-y-2 scale-[0.985] opacity-0 blur-[1px]"
+            }`}
           >
             <div className="grid grid-cols-2 gap-2 px-3 py-2.5">
               <div
