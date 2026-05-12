@@ -38,6 +38,8 @@ $githubInstallerName = $installerName -replace " ", "."
 $githubInstallerPath = Join-Path $nsisDir $githubInstallerName
 $githubSignaturePath = "$githubInstallerPath.sig"
 $latestPath = Join-Path $bundleDir "latest.json"
+$legacyLatestPath = Join-Path $bundleDir "atestjson"
+$legacyLatestJsonPath = Join-Path $bundleDir "latestjson"
 
 function Invoke-Step {
   param(
@@ -86,10 +88,14 @@ Assert-PathExists -Path $latestPath -Label "latest.json"
 Invoke-Step "Preparing GitHub-friendly asset names" {
   Copy-Item $installerPath $githubInstallerPath -Force
   Copy-Item $signaturePath $githubSignaturePath -Force
+  Copy-Item $latestPath $legacyLatestPath -Force
+  Copy-Item $latestPath $legacyLatestJsonPath -Force
 }
 
 $assets = @(
   $latestPath,
+  $legacyLatestPath,
+  $legacyLatestJsonPath,
   $githubInstallerPath,
   $githubSignaturePath
 )

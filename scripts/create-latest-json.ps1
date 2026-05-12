@@ -45,4 +45,6 @@ $latestPath = Join-Path $bundleDir "latest.json"
 $latestJson = $latest | ConvertTo-Json -Depth 8
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($latestPath, $latestJson, $utf8NoBom)
+Copy-Item $latestPath (Join-Path $bundleDir "atestjson") -Force
+Copy-Item $latestPath (Join-Path $bundleDir "latestjson") -Force
 Write-Host "Generated $latestPath"
