@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import type { Task, TaskDraft, TaskPriority } from "../types";
+import type { Task, TaskDraft } from "../types";
 
 const COLORS = [
   { name: "coral", hex: "#FF6B6B" },
@@ -9,12 +9,6 @@ const COLORS = [
   { name: "yellow", hex: "#FFF59D" },
   { name: "purple", hex: "#A78BFA" },
   { name: "orange", hex: "#FB923C" },
-];
-
-const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = [
-  { value: "high", label: "高优先级" },
-  { value: "medium", label: "中优先级" },
-  { value: "low", label: "低优先级" },
 ];
 
 function formatInputDate(date: Date) {
@@ -46,7 +40,6 @@ export function TaskModal({
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [date, setDate] = useState(formatInputDate(initialDate));
-  const [priority, setPriority] = useState<TaskPriority>("medium");
   const [selectedColor, setSelectedColor] = useState(defaultColor);
   const [showAdvanced, setShowAdvanced] = useState(mode === "edit");
 
@@ -60,7 +53,6 @@ export function TaskModal({
       setDescription(task.description ?? "");
       setCategory(task.category ?? "");
       setDate(formatInputDate(task.date));
-      setPriority(task.priority ?? "medium");
       setShowAdvanced(true);
       setSelectedColor({
         name: task.color,
@@ -73,7 +65,6 @@ export function TaskModal({
     setDescription("");
     setCategory("");
     setDate(formatInputDate(initialDate));
-    setPriority("medium");
     setShowAdvanced(false);
     setSelectedColor(defaultColor);
   }, [defaultColor, initialDate, isOpen, mode, task]);
@@ -91,7 +82,6 @@ export function TaskModal({
       color: selectedColor.name,
       colorHex: selectedColor.hex,
       date,
-      priority,
     });
 
     onClose();
@@ -174,32 +164,15 @@ export function TaskModal({
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="mb-1.5 block text-sm">分类</label>
-                        <input
-                          type="text"
-                          value={category}
-                          onChange={(event) => setCategory(event.target.value)}
-                          placeholder="工作/学习/生活"
-                          className="w-full rounded-lg border border-border px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-primary"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-1.5 block text-sm">优先级</label>
-                        <select
-                          value={priority}
-                          onChange={(event) => setPriority(event.target.value as TaskPriority)}
-                          className="w-full rounded-lg border border-border bg-white px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          {PRIORITY_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm">分类</label>
+                      <input
+                        type="text"
+                        value={category}
+                        onChange={(event) => setCategory(event.target.value)}
+                        placeholder="工作/学习/生活"
+                        className="w-full rounded-lg border border-border px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
                     </div>
 
                     <div>

@@ -60,6 +60,15 @@ pub fn run() {
             "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "add_delayed_task_marker",
+            sql: r#"
+              ALTER TABLE tasks ADD COLUMN is_delayed INTEGER NOT NULL DEFAULT 0;
+              CREATE INDEX IF NOT EXISTS idx_tasks_delayed ON tasks(is_delayed);
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

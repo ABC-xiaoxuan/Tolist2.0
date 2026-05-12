@@ -9,16 +9,14 @@ interface TaskCardProps {
   onEdit: (task: Task) => void;
 }
 
-const PRIORITY_LABELS = {
-  high: "高优先级",
-  medium: "中优先级",
-  low: "低优先级",
-};
-
 export const TaskCard = memo(function TaskCard({ task, onToggle, onDelete, onEdit }: TaskCardProps) {
+  const indicatorColor = "var(--primary)";
+
   return (
     <div
-      className="cursor-pointer rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm transition-all hover:scale-[1.01] hover:shadow-md"
+      className={`select-none cursor-pointer rounded-lg border bg-white px-3 py-2.5 shadow-sm transition-all hover:scale-[1.01] hover:shadow-md ${
+        task.delayed ? "border-orange/45" : "border-border"
+      }`}
       onClick={() => onEdit(task)}
     >
       <div className="flex items-start gap-2">
@@ -27,14 +25,10 @@ export const TaskCard = memo(function TaskCard({ task, onToggle, onDelete, onEdi
             event.stopPropagation();
             onToggle(task.id);
           }}
-          className={`flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-full border-2 transition-all active:scale-90 ${
-            task.completed
-              ? `bg-${task.color} border-${task.color}`
-              : `border-${task.color} bg-white`
-          }`}
+          className="flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-full border-2 transition-all active:scale-90"
           style={{
-            backgroundColor: task.completed ? task.colorHex : "white",
-            borderColor: task.colorHex,
+            backgroundColor: task.completed ? indicatorColor : "white",
+            borderColor: indicatorColor,
           }}
         >
           {task.completed && <Check className="h-3.5 w-3.5 text-white" />}
@@ -56,17 +50,17 @@ export const TaskCard = memo(function TaskCard({ task, onToggle, onDelete, onEdi
             </p>
           )}
           <div className="mt-1 flex flex-wrap items-center gap-1">
+            {task.delayed && (
+              <span className="rounded-full bg-orange/15 px-1.5 py-0.5 text-[11px] text-orange">
+                延迟任务
+              </span>
+            )}
             {task.category && (
               <span
                 className="rounded-full px-1.5 py-0.5 text-[11px]"
                 style={{ backgroundColor: `${task.colorHex}20`, color: task.colorHex }}
               >
                 {task.category}
-              </span>
-            )}
-            {task.priority && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {PRIORITY_LABELS[task.priority]}
               </span>
             )}
           </div>

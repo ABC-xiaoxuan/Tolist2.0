@@ -1,6 +1,7 @@
+import { memo, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Task } from "../types";
-import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, format, isSameMonth, isSameDay } from "date-fns";
+import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, format, isSameMonth } from "date-fns";
 import { zhCN } from "date-fns/locale/zh-CN";
 
 interface MonthViewProps {
@@ -10,23 +11,41 @@ interface MonthViewProps {
   onDateOpen: (date: Date) => void;
 }
 
-export function MonthView({ tasks, selectedDate, onDateSelect, onDateOpen }: MonthViewProps) {
-  const monthStart = startOfMonth(selectedDate);
-  const monthEnd = endOfMonth(selectedDate);
-  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
-  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+export const MonthView = memo(function MonthView({ tasks, selectedDate, onDateSelect, onDateOpen }: MonthViewProps) {
+  const indicatorColor = "var(--primary)";
+  const monthStart = useMemo(() => startOfMonth(selectedDate), [selectedDate]);
+  const monthEnd = useMemo(() => endOfMonth(selectedDate), [selectedDate]);
+  const calendarStart = useMemo(() => startOfWeek(monthStart, { weekStartsOn: 1 }), [monthStart]);
+  const calendarEnd = useMemo(() => endOfWeek(monthEnd, { weekStartsOn: 1 }), [monthEnd]);
+  const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const days = useMemo(() => {
+    const calendarDays: Date[] = [];
+    let day = calendarStart;
 
-  const days: Date[] = [];
-  let day = calendarStart;
-  while (day <= calendarEnd) {
-    days.push(day);
-    day = addDays(day, 1);
-  }
+    while (day <= calendarEnd) {
+      calendarDays.push(day);
+      day = addDays(day, 1);
+    }
 
-  const getTasksForDay = (day: Date) => {
-    return tasks.filter(task => isSameDay(task.date, day));
-  };
+    return calendarDays;
+  }, [calendarEnd, calendarStart]);
+  const tasksByDay = useMemo(() => {
+    const groupedTasks = new Map<string, Task[]>();
 
+    for (const task of tasks) {
+      const taskDateKey = format(task.date, "yyyy-MM-dd");
+      const dayTasks = groupedTasks.get(taskDateKey);
+
+      if (dayTasks) {
+        dayTasks.push(task);
+      } else {
+        groupedTasks.set(taskDateKey, [task]);
+      }
+    }
+
+    return groupedTasks;
+  }, [tasks]);
   const weekDays = ["一", "二", "三", "四", "五", "六", "日"];
   const goToPreviousMonth = () => onDateSelect(subMonths(monthStart, 1));
   const goToNextMonth = () => onDateSelect(addMonths(monthStart, 1));
@@ -81,10 +100,11 @@ export function MonthView({ tasks, selectedDate, onDateSelect, onDateOpen }: Mon
 
         <div className="grid grid-cols-7 gap-1.5">
           {days.map((day, idx) => {
-            const dayTasks = getTasksForDay(day);
+            const dayKey = format(day, "yyyy-MM-dd");
+            const dayTasks = tasksByDay.get(dayKey) ?? [];
             const isCurrentMonth = isSameMonth(day, selectedDate);
-            const isToday = isSameDay(day, new Date());
-            const isSelected = isSameDay(day, selectedDate);
+            const isToday = dayKey === todayKey;
+            const isSelected = dayKey === selectedDateKey;
 
             return (
               <button
@@ -112,7 +132,7 @@ export function MonthView({ tasks, selectedDate, onDateSelect, onDateOpen }: Mon
                       <div
                         key={i}
                         className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: task.colorHex }}
+                        style={{ backgroundColor: task.delayed ? "#FB923C" : indicatorColor }}
                       />
                     ))}
                     {dayTasks.length > 3 && (
@@ -127,4 +147,4 @@ export function MonthView({ tasks, selectedDate, onDateSelect, onDateOpen }: Mon
       </div>
     </div>
   );
-}
+});

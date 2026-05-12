@@ -1,15 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2, Minus, Plus, Settings2, X, PanelTopOpen } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { availableMonitors, currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { confirm, message, save } from "@tauri-apps/plugin-dialog";
+import packageJson from "../../package.json";
 import { ViewSwitcher } from "./components/view-switcher";
 import { DayView } from "./components/day-view";
-import { DashboardStats, Task, TaskDraft, ViewType } from "./types";
-import { format } from "date-fns";
-import { zhCN } from "date-fns/locale/zh-CN";
+import { DashboardStats, MascotReaction, Task, TaskDraft, ViewType } from "./types";
 import {
   backupDatabase,
   clearTasks,
@@ -17,7 +17,9 @@ import {
   deleteTask,
   exportTasksJson,
   getDashboardSummary,
+  listTasksByDate,
   listTasks,
+  postponeOverdueTasks,
   seedExampleTasks,
   updateTask,
   updateTaskCompletion,
@@ -27,6 +29,7 @@ const TASKS_UPDATED_EVENT = "tasks-updated";
 const FLOATING_POSITION_KEY = "floating-panel-position";
 const HITOKOTO_ENDPOINT = "https://v1.hitokoto.cn/?c=f&encode=text";
 const AUTO_UPDATE_CHECK_DELAY = 3500;
+const MAIN_THEME_COLOR_KEY = "main-theme-color";
 const WeekView = lazy(() => import("./components/week-view").then((module) => ({ default: module.WeekView })));
 const MonthView = lazy(() => import("./components/month-view").then((module) => ({ default: module.MonthView })));
 const StatsPanel = lazy(() => import("./components/stats-panel").then((module) => ({ default: module.StatsPanel })));
@@ -34,6 +37,10 @@ const FloatingPanel = lazy(() => import("./components/floating-panel").then((mod
 const DateTasksModal = lazy(() => import("./components/date-tasks-modal").then((module) => ({ default: module.DateTasksModal })));
 const TaskModal = lazy(() => import("./components/task-modal").then((module) => ({ default: module.TaskModal })));
 const ToolsModal = lazy(() => import("./components/tools-modal").then((module) => ({ default: module.ToolsModal })));
+
+type TasksUpdatedEventPayload = {
+  source?: string;
+};
 
 function TasksLoadingState() {
   return (
@@ -57,6 +64,44 @@ function PanelFallback() {
   );
 }
 
+function hexToRgb(hex: string) {
+  const normalized = hex.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+
+  const value = Number.parseInt(normalized, 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function rgbaFromHex(hex: string, alpha: number) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return `rgba(255,107,107,${alpha})`;
+  }
+
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function getLocalDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getDelayUntilNextLocalDay() {
+  const now = new Date();
+  const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 2);
+
+  return Math.max(nextDay.getTime() - now.getTime(), 1000);
+}
+
 export default function App() {
   const windowRef = useRef(getCurrentWindow());
   const isFloatingWindow = windowRef.current.label === "floating";
@@ -69,10 +114,24 @@ export default function App() {
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [isMainWindowMaximized, setIsMainWindowMaximized] = useState(false);
+  const [appVersion, setAppVersion] = useState(packageJson.version);
+  const [mascotReaction, setMascotReaction] = useState<MascotReaction>({
+    type: "idle",
+    token: 0,
+  });
+  const [mainThemeColor, setMainThemeColor] = useState(() => {
+    if (typeof window === "undefined") {
+      return "#FF6B6B";
+    }
+
+    return window.localStorage.getItem(MAIN_THEME_COLOR_KEY) ?? "#FF6B6B";
+  });
   const [tasks, setTasks] = useState<Task[]>([]);
+  const tasksRef = useRef<Task[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
     totalCount: 0,
     completedCount: 0,
+    delayedCount: 0,
     weeklyData: [],
     categoryData: [],
   });
@@ -103,18 +162,32 @@ export default function App() {
     return fallback;
   };
 
+  const loadTasksForCurrentWindow = useCallback(() => {
+    if (isFloatingWindow) {
+      return listTasksByDate(getLocalDateKey(new Date()));
+    }
+
+    return listTasks();
+  }, [isFloatingWindow]);
+
   const refreshData = useCallback(async () => {
-    const [loadedTasks, loadedStats] = await Promise.all([listTasks(), getDashboardSummary()]);
+    await postponeOverdueTasks(getLocalDateKey(new Date()));
+    const [loadedTasks, loadedStats] = await Promise.all([loadTasksForCurrentWindow(), getDashboardSummary()]);
     setTasks(loadedTasks);
     setStats(loadedStats);
-  }, []);
+  }, [loadTasksForCurrentWindow]);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadData() {
       try {
-        const [loadedTasks, loadedStats] = await Promise.all([listTasks(), getDashboardSummary()]);
+        await postponeOverdueTasks(getLocalDateKey(new Date()));
+        const [loadedTasks, loadedStats] = await Promise.all([loadTasksForCurrentWindow(), getDashboardSummary()]);
         if (!cancelled) {
           setTasks(loadedTasks);
           setStats(loadedStats);
@@ -136,13 +209,17 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadTasksForCurrentWindow]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void listen(TASKS_UPDATED_EVENT, () => {
+    void listen<TasksUpdatedEventPayload>(TASKS_UPDATED_EVENT, (event) => {
+      if (event.payload?.source === windowRef.current.label) {
+        return;
+      }
+
       void refreshData();
     }).then((dispose) => {
       if (cancelled) {
@@ -159,6 +236,10 @@ export default function App() {
   }, [refreshData]);
 
   useEffect(() => {
+    if (isFloatingWindow) {
+      return undefined;
+    }
+
     const controller = new AbortController();
 
     async function loadDailyQuote() {
@@ -188,7 +269,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [isFloatingWindow]);
 
   useEffect(() => {
     if (isFloatingWindow) {
@@ -215,9 +296,95 @@ export default function App() {
     };
   }, [isFloatingWindow]);
 
-  const notifyTasksUpdated = useCallback(async () => {
-    await emit(TASKS_UPDATED_EVENT);
+  useEffect(() => {
+    if (isFloatingWindow) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void getVersion()
+      .then((version) => {
+        if (!cancelled && version) {
+          setAppVersion(version);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isFloatingWindow]);
+
+  useEffect(() => {
+    if (isFloatingWindow) {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.style.setProperty("--primary", mainThemeColor);
+    root.style.setProperty("--ring", mainThemeColor);
+    root.style.setProperty("--chart-1", mainThemeColor);
+    root.style.setProperty("--sidebar-primary", mainThemeColor);
+    root.style.setProperty("--sidebar-ring", mainThemeColor);
+    root.style.setProperty("--primary-soft", rgbaFromHex(mainThemeColor, 0.12));
+    root.style.setProperty("--primary-soft-strong", rgbaFromHex(mainThemeColor, 0.18));
+    window.localStorage.setItem(MAIN_THEME_COLOR_KEY, mainThemeColor);
+  }, [isFloatingWindow, mainThemeColor]);
+
+  const handleMainThemeColorChange = useCallback((color: string) => {
+    const normalized = color.trim();
+    const withHash = normalized.startsWith("#") ? normalized : `#${normalized}`;
+    if (/^#[0-9a-fA-F]{0,6}$/.test(withHash)) {
+      if (withHash.length === 7) {
+        setMainThemeColor(withHash);
+      } else if (normalized === "") {
+        setMainThemeColor("#FF6B6B");
+      }
+    }
   }, []);
+
+  const notifyTasksUpdated = useCallback(async () => {
+    await emit(TASKS_UPDATED_EVENT, { source: windowRef.current.label } satisfies TasksUpdatedEventPayload);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    const scheduleRollover = () => {
+      timerId = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+
+        const today = new Date();
+        if (!isFloatingWindow) {
+          setSelectedDate(today);
+        }
+
+        void refreshData()
+          .then(notifyTasksUpdated)
+          .catch((error) => {
+            setErrorMessage(error instanceof Error ? error.message : "延迟任务处理失败");
+          })
+          .finally(() => {
+            if (!cancelled) {
+              scheduleRollover();
+            }
+          });
+      }, getDelayUntilNextLocalDay());
+    };
+
+    scheduleRollover();
+
+    return () => {
+      cancelled = true;
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [isFloatingWindow, notifyTasksUpdated, refreshData]);
 
   const openCreateTaskModal = useCallback(() => {
     setTaskModalMode("create");
@@ -238,17 +405,19 @@ export default function App() {
   }, []);
 
   const handleToggleTask = useCallback(async (id: string) => {
-    const currentTask = tasks.find((task) => task.id === id);
+    const currentTask = tasksRef.current.find((task) => task.id === id);
     if (!currentTask) {
       return;
     }
 
     const nextCompleted = !currentTask.completed;
-    setTasks((prev) =>
-      prev.map((task) =>
+    setTasks((prev) => {
+      const nextTasks = prev.map((task) =>
         task.id === id ? { ...task, completed: nextCompleted } : task
-      )
-    );
+      );
+      tasksRef.current = nextTasks;
+      return nextTasks;
+    });
 
     try {
       await updateTaskCompletion(id, nextCompleted);
@@ -256,22 +425,31 @@ export default function App() {
       setStats((prev) => ({
         ...prev,
         completedCount: prev.completedCount + (nextCompleted ? 1 : -1),
+        delayedCount: currentTask.delayed
+          ? Math.max(prev.delayedCount + (nextCompleted ? -1 : 1), 0)
+          : prev.delayedCount,
       }));
+      if (nextCompleted) {
+        setMascotReaction({ type: "task-completed", token: Date.now() });
+      }
       await notifyTasksUpdated();
     } catch (error) {
-      setTasks((prev) =>
-        prev.map((task) =>
+      setTasks((prev) => {
+        const revertedTasks = prev.map((task) =>
           task.id === id ? { ...task, completed: currentTask.completed } : task
-        )
-      );
+        );
+        tasksRef.current = revertedTasks;
+        return revertedTasks;
+      });
       setErrorMessage(error instanceof Error ? error.message : "任务状态更新失败");
     }
-  }, [tasks, notifyTasksUpdated]);
+  }, [notifyTasksUpdated]);
 
   const handleDeleteTask = useCallback(async (id: string) => {
     try {
       await deleteTask(id);
       await refreshData();
+      setMascotReaction({ type: "task-deleted", token: Date.now() });
       await notifyTasksUpdated();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "任务删除失败");
@@ -280,6 +458,8 @@ export default function App() {
 
   const handleAddTask = useCallback(async (newTask: TaskDraft) => {
     try {
+      const isEditing = taskModalMode === "edit" && editingTask;
+
       if (taskModalMode === "edit" && editingTask) {
         await updateTask(editingTask.id, newTask);
       } else {
@@ -287,6 +467,11 @@ export default function App() {
       }
 
       await refreshData();
+      if (isEditing) {
+        setMascotReaction({ type: "task-updated", token: Date.now() });
+      } else {
+        setMascotReaction({ type: "task-added", token: Date.now() });
+      }
       await notifyTasksUpdated();
       setErrorMessage(null);
     } catch (error) {
@@ -353,6 +538,7 @@ export default function App() {
 
     await clearTasks();
     await refreshData();
+    setMascotReaction({ type: "tasks-cleared", token: Date.now() });
     await notifyTasksUpdated();
     await message("所有任务已清空。", { title: "已完成", kind: "info" });
   }, [refreshData, notifyTasksUpdated]);
@@ -360,6 +546,7 @@ export default function App() {
   const handleSeedExamples = useCallback(async () => {
     await seedExampleTasks();
     await refreshData();
+    setMascotReaction({ type: "examples-loaded", token: Date.now() });
     await notifyTasksUpdated();
     await message("示例任务已经载入。", { title: "初始化完成", kind: "info" });
   }, [refreshData, notifyTasksUpdated]);
@@ -547,8 +734,14 @@ export default function App() {
 
   return (
     <div className="flex size-full">
-      <div className={`flex flex-1 flex-col overflow-hidden border border-border/70 bg-white ${isMainWindowMaximized ? "" : "rounded-[18px]"}`}>
-        <div className="flex h-9 items-center justify-between border-b border-border/70 bg-white/96 pl-3 pr-1">
+      <div
+        className={`flex flex-1 flex-col overflow-hidden border border-border/70 bg-white ${isMainWindowMaximized ? "" : "rounded-[18px]"}`}
+        style={{ boxShadow: isMainWindowMaximized ? undefined : `0 18px 44px ${rgbaFromHex(mainThemeColor, 0.12)}` }}
+      >
+        <div
+          className="flex h-9 items-center justify-between border-b border-border/70 bg-white/96 pl-3 pr-1"
+          style={{ background: `linear-gradient(180deg, ${rgbaFromHex(mainThemeColor, 0.06)} 0%, rgba(255,255,255,0.96) 100%)` }}
+        >
           <div
             data-tauri-drag-region
             className="flex flex-1 items-center gap-2 self-stretch"
@@ -557,6 +750,9 @@ export default function App() {
               <div className="h-2.5 w-2.5 rounded-[4px] bg-white" />
             </div>
             <span className="text-[13px] text-foreground">我的待办</span>
+            <span className="rounded-full border border-border/80 bg-white/82 px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              v{appVersion}
+            </span>
           </div>
 
           <div className="flex items-center gap-0.5">
@@ -584,158 +780,176 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1">
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <header className="border-b border-border bg-white px-3.5 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary transition-transform duration-500 hover:rotate-180">
-                  <div className="h-3.5 w-3.5 rounded-[6px] bg-white" />
-                </div>
-                <div>
-                  <h1 className="text-[17px] leading-none">我的待办</h1>
-                  <p
-                    className="mt-0.5 max-w-[280px] line-clamp-2 text-[11px] leading-4.5 text-muted-foreground"
-                    title={dailyQuote}
-                  >
-                    {dailyQuote}
-                  </p>
-                </div>
-              </div>
+        <div
+          className="flex min-h-0 flex-1 px-3 py-3"
+          style={{
+            background: `radial-gradient(circle at top left, ${rgbaFromHex(mainThemeColor, 0.06)} 0%, rgba(248,250,252,0.92) 24%, rgba(255,255,255,1) 60%)`,
+          }}
+        >
+          <div className="flex min-h-0 w-full items-start gap-4">
+            <div className="flex min-w-0 flex-1 flex-col self-stretch overflow-hidden">
+              <header
+                className="border-b border-border bg-white px-3.5 py-2.5"
+                style={{ background: `linear-gradient(180deg, ${rgbaFromHex(mainThemeColor, 0.05)} 0%, rgba(255,255,255,1) 100%)` }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <ViewSwitcher currentView={view} onViewChange={setView} />
 
-              <div className="flex items-center gap-1.5">
-                <ViewSwitcher currentView={view} onViewChange={setView} />
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => void handleOpenFloatingWindow()}
+                      className="rounded-lg p-1.5 transition-transform hover:scale-105 hover:bg-muted active:scale-95"
+                      title="打开浮窗"
+                    >
+                      <PanelTopOpen className="h-4 w-4" />
+                    </button>
 
-                <button
-                  onClick={() => void handleOpenFloatingWindow()}
-                  className="rounded-lg p-1.5 transition-transform hover:scale-105 hover:bg-muted active:scale-95"
-                  title="打开浮窗"
-                >
-                  <PanelTopOpen className="h-4 w-4" />
-                </button>
+                    <button
+                      onClick={() => setIsToolsModalOpen(true)}
+                      className="rounded-lg p-1.5 transition-transform hover:scale-105 hover:bg-muted active:scale-95"
+                    >
+                      <Settings2 className="h-4 w-4" />
+                    </button>
 
-                <button
-                  onClick={() => setIsToolsModalOpen(true)}
-                  className="rounded-lg p-1.5 transition-transform hover:scale-105 hover:bg-muted active:scale-95"
-                >
-                  <Settings2 className="h-4 w-4" />
-                </button>
-
-                <button
-                  onClick={openCreateTaskModal}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-transform hover:scale-105 active:scale-95"
-                  title="新建任务"
-                  aria-label="新建任务"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </header>
-
-          <main className="flex-1 overflow-y-auto px-3.5 py-3">
-            {errorMessage && (
-              <div className="mb-3 rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {errorMessage}
-              </div>
-            )}
-            {isLoading ? (
-              <TasksLoadingState />
-            ) : tasks.length === 0 ? (
-              <div className="flex h-full items-center justify-center">
-                <div className="max-w-md rounded-2xl border border-border bg-white p-5 text-center shadow-sm">
-                  <h2 className="text-xl">欢迎来到你的本地待办空间</h2>
-                  <p className="mt-2.5 text-[13px] leading-6 text-muted-foreground">
-                    当前数据库还是空的。你可以先创建第一条任务，或者一键载入示例任务，先把日历、统计和迷你模式完整跑一遍。
-                  </p>
-                  <div className="mt-4 flex justify-center gap-2.5">
                     <button
                       onClick={openCreateTaskModal}
-                      className="rounded-lg bg-primary px-3.5 py-2 text-[13px] text-primary-foreground"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-transform hover:scale-105 active:scale-95"
+                      title="新建任务"
+                      aria-label="新建任务"
                     >
-                      创建首个任务
-                    </button>
-                    <button
-                      onClick={() => void handleSeedExamples()}
-                      className="rounded-lg border border-border px-3.5 py-2 text-[13px]"
-                    >
-                      载入示例任务
+                      <Plus className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-              </div>
-            ) : (
-            <>
-              {view === "day" && (
-                <div>
-                  <DayView
-                    tasks={selectedDateTasks}
-                    onToggle={handleToggleTask}
-                    onDelete={handleDeleteTask}
-                    onEdit={openEditTaskModal}
-                    selectedDate={selectedDate}
-                  />
-                </div>
-              )}
+              </header>
 
-              {view === "week" && (
-                <div>
-                  <Suspense fallback={<PanelFallback />}>
-                    <WeekView
-                      tasks={tasks}
-                      onToggle={handleToggleTask}
-                      onDelete={handleDeleteTask}
-                      onEdit={openEditTaskModal}
-                      selectedDate={selectedDate}
-                      onDateSelect={setSelectedDate}
-                      onDateOpen={openDateTasksModal}
-                    />
-                  </Suspense>
-                </div>
-              )}
+              <main className="flex min-h-0 flex-1 flex-col">
+                <div className="flex min-h-0 w-full flex-1 flex-col gap-3">
+                  {errorMessage && (
+                    <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                      {errorMessage}
+                    </div>
+                  )}
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                    {isLoading ? (
+                      <div className="rounded-[24px] border border-border/70 bg-white/88 p-3 shadow-sm backdrop-blur-sm">
+                        <TasksLoadingState />
+                      </div>
+                    ) : tasks.length === 0 ? (
+                      <div className="flex min-h-[280px] h-full items-center justify-center">
+                        <div className="max-w-md rounded-2xl border border-border bg-white p-5 text-center shadow-sm">
+                          <h2 className="text-xl">欢迎来到你的本地待办空间</h2>
+                          <p className="mt-2.5 text-[13px] leading-6 text-muted-foreground">
+                            当前数据库还是空的。你可以先创建第一条任务，或者一键载入示例任务，先把日历、统计和迷你模式完整跑一遍。
+                          </p>
+                          <div className="mt-4 flex justify-center gap-2.5">
+                            <button
+                              onClick={openCreateTaskModal}
+                              className="rounded-lg bg-primary px-3.5 py-2 text-[13px] text-primary-foreground"
+                            >
+                              创建首个任务
+                            </button>
+                            <button
+                              onClick={() => void handleSeedExamples()}
+                              className="rounded-lg border border-border px-3.5 py-2 text-[13px]"
+                            >
+                              载入示例任务
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                    <>
+                      {view === "day" && (
+                        <div className="rounded-[24px] border border-border/70 bg-white/90 p-3 shadow-sm backdrop-blur-sm">
+                          <DayView
+                            tasks={selectedDateTasks}
+                            onToggle={handleToggleTask}
+                            onDelete={handleDeleteTask}
+                            onEdit={openEditTaskModal}
+                            selectedDate={selectedDate}
+                          />
+                        </div>
+                      )}
 
-              {view === "month" && (
-                <div>
-                  <Suspense fallback={<PanelFallback />}>
-                    <MonthView
-                      tasks={tasks}
-                      selectedDate={selectedDate}
-                      onDateSelect={setSelectedDate}
-                      onDateOpen={openDateTasksModal}
-                    />
-                  </Suspense>
-                </div>
-              )}
-            </>
-            )}
-          </main>
-        </div>
+                      {view === "week" && (
+                        <div className="rounded-[24px] border border-border/70 bg-white/90 p-3 shadow-sm backdrop-blur-sm">
+                          <Suspense fallback={<PanelFallback />}>
+                            <WeekView
+                              tasks={tasks}
+                              onToggle={handleToggleTask}
+                              onDelete={handleDeleteTask}
+                              onEdit={openEditTaskModal}
+                              selectedDate={selectedDate}
+                              onDateSelect={setSelectedDate}
+                              onDateOpen={openDateTasksModal}
+                              onWeekChange={setSelectedDate}
+                            />
+                          </Suspense>
+                        </div>
+                      )}
 
-        <div className="border-l border-border bg-white">
-          {isLoading ? (
-            <div className="w-52 bg-white p-2.5 xl:w-56">
-              <div className="mb-2 h-4 w-20 animate-pulse rounded-full bg-muted" />
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="h-[74px] animate-pulse rounded-lg bg-muted/70" />
-                <div className="h-[74px] animate-pulse rounded-lg bg-muted/70" />
-              </div>
-              <div className="mt-2 h-[76px] animate-pulse rounded-lg bg-muted/70" />
+                      {view === "month" && (
+                        <div className="rounded-[24px] border border-border/70 bg-white/90 p-3 shadow-sm backdrop-blur-sm">
+                          <Suspense fallback={<PanelFallback />}>
+                            <MonthView
+                              tasks={tasks}
+                              selectedDate={selectedDate}
+                              onDateSelect={setSelectedDate}
+                              onDateOpen={openDateTasksModal}
+                            />
+                          </Suspense>
+                        </div>
+                      )}
+                    </>
+                    )}
+                  </div>
+
+                  <div
+                    className="mt-auto rounded-[20px] border border-border/70 bg-white/88 px-3.5 py-3 shadow-sm backdrop-blur-sm"
+                    style={{
+                      background: `linear-gradient(135deg, ${rgbaFromHex(mainThemeColor, 0.06)} 0%, rgba(255,255,255,0.96) 42%, rgba(255,255,255,1) 100%)`,
+                    }}
+                  >
+                    <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                      每日一言
+                    </p>
+                    <p className="mt-1.5 text-[13px] leading-5 text-foreground/78" title={dailyQuote}>
+                      {dailyQuote}
+                    </p>
+                  </div>
+                </div>
+              </main>
             </div>
-          ) : (
-            <Suspense
-              fallback={
-                <div className="w-52 bg-white p-2.5 xl:w-56">
-                  <PanelFallback />
+
+            <div className="w-[240px] flex-none self-stretch border-l border-border bg-white">
+              {isLoading ? (
+                <div className="bg-white p-2.5">
+                  <div className="mb-2 h-4 w-20 animate-pulse rounded-full bg-muted" />
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="h-[74px] animate-pulse rounded-lg bg-muted/70" />
+                    <div className="h-[74px] animate-pulse rounded-lg bg-muted/70" />
+                  </div>
+                  <div className="mt-2 h-[76px] animate-pulse rounded-lg bg-muted/70" />
                 </div>
-              }
-            >
-              <StatsPanel
-                completedCount={stats.completedCount}
-                totalCount={stats.totalCount}
-              />
-            </Suspense>
-          )}
-        </div>
+              ) : (
+                <Suspense
+                  fallback={
+                    <div className="bg-white p-2.5">
+                      <PanelFallback />
+                    </div>
+                  }
+                >
+                  <StatsPanel
+                    completedCount={stats.completedCount}
+                    totalCount={stats.totalCount}
+                    delayedCount={stats.delayedCount}
+                    mascotReaction={mascotReaction}
+                  />
+                </Suspense>
+              )}
+            </div>
+          </div>
         </div>
 
       {previewDate !== null && (
@@ -771,6 +985,8 @@ export default function App() {
             onClearAll={handleClearAll}
             onSeedExampleTasks={handleSeedExamples}
             onCheckUpdates={handleCheckUpdates}
+            mainThemeColor={mainThemeColor}
+            onMainThemeColorChange={handleMainThemeColorChange}
             isCheckingUpdates={isCheckingUpdates}
             taskCount={stats.totalCount}
           />

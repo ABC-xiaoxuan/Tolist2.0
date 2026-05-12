@@ -6,7 +6,6 @@ import {
   DashboardStats,
   Task,
   TaskDraft,
-  TaskPriority,
   WeeklyStat,
 } from "./types";
 
@@ -22,12 +21,13 @@ type TaskRow = {
   color: string;
   color_hex: string;
   task_date: string;
-  priority: TaskPriority | null;
+  is_delayed: number;
 };
 
 type SummaryRow = {
   total_count: number | null;
   completed_count: number | null;
+  delayed_count: number | null;
 };
 
 type WeeklyRow = {
@@ -70,7 +70,7 @@ function mapRowToTask(row: TaskRow): Task {
     color: row.color,
     colorHex: row.color_hex,
     date: dateValue,
-    priority: row.priority ?? "medium",
+    delayed: Boolean(row.is_delayed),
   };
 }
 
@@ -83,7 +83,7 @@ function mapDraftToBindValues(taskDraft: TaskDraft) {
     taskDraft.color,
     taskDraft.colorHex,
     taskDraft.date,
-    taskDraft.priority,
+    "medium",
   ];
 }
 
@@ -100,7 +100,7 @@ export async function listTasks() {
       color,
       color_hex,
       task_date,
-      priority
+      is_delayed
     FROM tasks
     ORDER BY
       CASE
@@ -111,6 +111,52 @@ export async function listTasks() {
   );
 
   return rows.map(mapRowToTask);
+}
+
+export async function listTasksByDate(dateKey: string) {
+  const db = await getDb();
+  const rows = await db.select<TaskRow[]>(
+    `SELECT
+      id,
+      title,
+      description,
+      completed,
+      time,
+      category,
+      color,
+      color_hex,
+      task_date,
+      is_delayed
+    FROM tasks
+    WHERE
+      task_date = ?
+      OR (instr(task_date, 'T') > 0 AND substr(task_date, 1, 10) = ?)
+    ORDER BY created_at ASC`,
+    [dateKey, dateKey]
+  );
+
+  return rows.map(mapRowToTask);
+}
+
+export async function postponeOverdueTasks(todayKey: string) {
+  const db = await getDb();
+  const result = await db.execute(
+    `UPDATE tasks
+    SET
+      task_date = ?,
+      is_delayed = 1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE completed = 0
+      AND (
+        CASE
+          WHEN instr(task_date, 'T') > 0 THEN substr(task_date, 1, 10)
+          ELSE task_date
+        END
+      ) < ?`,
+    [todayKey, todayKey]
+  );
+
+  return result.rowsAffected;
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
@@ -124,7 +170,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     db.select<SummaryRow[]>(
       `SELECT
         COUNT(*) AS total_count,
-        SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completed_count
+        SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completed_count,
+        SUM(CASE WHEN is_delayed = 1 AND completed = 0 THEN 1 ELSE 0 END) AS delayed_count
       FROM tasks`
     ),
     db.select<WeeklyRow[]>(
@@ -155,7 +202,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     ),
   ]);
 
-  const summary = summaryRows[0] ?? { total_count: 0, completed_count: 0 };
+  const summary = summaryRows[0] ?? { total_count: 0, completed_count: 0, delayed_count: 0 };
   const weeklyMap = new Map(weeklyRows.map((row) => [row.day_key, row.completed_count]));
 
   const weeklyData: WeeklyStat[] = weeklyKeys.map((dayKey) => ({
@@ -172,6 +219,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   return {
     totalCount: Number(summary.total_count ?? 0),
     completedCount: Number(summary.completed_count ?? 0),
+    delayedCount: Number(summary.delayed_count ?? 0),
     weeklyData,
     categoryData,
   };
@@ -182,14 +230,16 @@ export async function getDashboardSummary(): Promise<DashboardStats> {
   const rows = await db.select<SummaryRow[]>(
     `SELECT
       COUNT(*) AS total_count,
-      SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completed_count
+      SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) AS completed_count,
+      SUM(CASE WHEN is_delayed = 1 AND completed = 0 THEN 1 ELSE 0 END) AS delayed_count
     FROM tasks`
   );
-  const summary = rows[0] ?? { total_count: 0, completed_count: 0 };
+  const summary = rows[0] ?? { total_count: 0, completed_count: 0, delayed_count: 0 };
 
   return {
     totalCount: Number(summary.total_count ?? 0),
     completedCount: Number(summary.completed_count ?? 0),
+    delayedCount: Number(summary.delayed_count ?? 0),
     weeklyData: [],
     categoryData: [],
   };
@@ -266,7 +316,6 @@ export async function seedExampleTasks() {
       color: "coral",
       colorHex: "#FF6B6B",
       date: getTaskDateKey(today),
-      priority: "high",
     },
     {
       title: "团队会议",
@@ -275,7 +324,6 @@ export async function seedExampleTasks() {
       color: "teal",
       colorHex: "#26C6DA",
       date: getTaskDateKey(today),
-      priority: "medium",
     },
     {
       title: "健身房训练",
@@ -284,7 +332,6 @@ export async function seedExampleTasks() {
       color: "purple",
       colorHex: "#A78BFA",
       date: getTaskDateKey(today),
-      priority: "low",
     },
     {
       title: "阅读技术文章",
@@ -293,7 +340,6 @@ export async function seedExampleTasks() {
       color: "yellow",
       colorHex: "#FFF59D",
       date: getTaskDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)),
-      priority: "medium",
     },
     {
       title: "代码评审",
@@ -302,7 +348,6 @@ export async function seedExampleTasks() {
       color: "orange",
       colorHex: "#FB923C",
       date: getTaskDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2)),
-      priority: "high",
     },
   ];
 

@@ -1,4 +1,4 @@
-import { ArchiveRestore, Database, Download, RefreshCw, Trash2, Wand2, X } from "lucide-react";
+import { ArchiveRestore, Database, Download, Palette, RefreshCw, Trash2, Wand2, X } from "lucide-react";
 
 interface ToolsModalProps {
   isOpen: boolean;
@@ -8,6 +8,8 @@ interface ToolsModalProps {
   onClearAll: () => void | Promise<void>;
   onSeedExampleTasks: () => void | Promise<void>;
   onCheckUpdates: () => void | Promise<void>;
+  mainThemeColor: string;
+  onMainThemeColorChange: (color: string) => void;
   isCheckingUpdates: boolean;
   taskCount: number;
 }
@@ -20,9 +22,12 @@ export function ToolsModal({
   onClearAll,
   onSeedExampleTasks,
   onCheckUpdates,
+  mainThemeColor,
+  onMainThemeColorChange,
   isCheckingUpdates,
   taskCount,
 }: ToolsModalProps) {
+  const mainColorPresets = ["#FF6B6B", "#2563EB", "#14B8A6", "#F97316", "#8B5CF6", "#10B981"];
   const actions = [
     {
       title: isCheckingUpdates ? "正在检查更新" : "检查在线更新",
@@ -114,6 +119,54 @@ export function ToolsModal({
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="rounded-lg bg-primary/10 p-2 text-primary">
+                    <Palette className="h-4.5 w-4.5" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px]">主程序主题色</h3>
+                    <p className="text-[13px] text-muted-foreground">
+                      调整主窗口按钮、高亮和强调色。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {mainColorPresets.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => onMainThemeColorChange(color)}
+                      className={`h-8 w-8 rounded-full border-2 transition-transform hover:scale-105 active:scale-95 ${
+                        mainThemeColor.toLowerCase() === color.toLowerCase() ? "border-foreground/70" : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      title={color}
+                      aria-label={`切换主题色 ${color}`}
+                    />
+                  ))}
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={mainThemeColor}
+                    onChange={(event) => onMainThemeColorChange(event.target.value)}
+                    className="h-9 w-11 cursor-pointer rounded-lg border border-border bg-transparent p-1"
+                    title="选择任意主题色"
+                  />
+                  <input
+                    type="text"
+                    value={mainThemeColor}
+                    onChange={(event) => onMainThemeColorChange(event.target.value)}
+                    className="h-9 flex-1 rounded-lg border border-border bg-white px-3 text-[13px] outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="#FF6B6B"
+                    maxLength={7}
+                  />
+                </div>
               </div>
 
               <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5 text-[13px] text-muted-foreground">

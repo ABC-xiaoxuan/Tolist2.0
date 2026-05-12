@@ -1,5 +1,3 @@
-export type TaskPriority = "low" | "medium" | "high";
-
 export interface Task {
   id: string;
   title: string;
@@ -10,7 +8,7 @@ export interface Task {
   color: string;
   colorHex: string;
   date: Date;
-  priority?: TaskPriority;
+  delayed: boolean;
 }
 
 export interface TaskDraft {
@@ -20,7 +18,6 @@ export interface TaskDraft {
   color: string;
   colorHex: string;
   date: string;
-  priority: TaskPriority;
 }
 
 export interface WeeklyStat {
@@ -37,8 +34,24 @@ export interface CategoryStat {
 export interface DashboardStats {
   totalCount: number;
   completedCount: number;
+  delayedCount: number;
   weeklyData: WeeklyStat[];
   categoryData: CategoryStat[];
 }
 
 export type ViewType = "day" | "week" | "month";
+
+export type MascotReactionType =
+  | "idle"
+  | "task-added"
+  | "task-completed"
+  | "task-updated"
+  | "task-deleted"
+  | "tasks-cleared"
+  | "examples-loaded"
+  | "pet-touched";
+
+export interface MascotReaction {
+  type: MascotReactionType;
+  token: number;
+}

@@ -1,12 +1,22 @@
+import { memo } from "react";
 import { CheckCircle2, Clock, TrendingUp } from "lucide-react";
+import type { MascotReaction } from "../types";
 import { CompletionPieChart } from "./charts/completion-pie-chart";
+import { MascotPet } from "./mascot-pet";
 
 interface StatsPanelProps {
   completedCount: number;
   totalCount: number;
+  delayedCount: number;
+  mascotReaction: MascotReaction;
 }
 
-export function StatsPanel({ completedCount, totalCount }: StatsPanelProps) {
+export const StatsPanel = memo(function StatsPanel({
+  completedCount,
+  totalCount,
+  delayedCount,
+  mascotReaction,
+}: StatsPanelProps) {
   const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const pendingCount = Math.max(totalCount - completedCount, 0);
   const focusLabel =
@@ -17,7 +27,7 @@ export function StatsPanel({ completedCount, totalCount }: StatsPanelProps) {
         : `还有 ${pendingCount} 项待完成`;
 
   return (
-    <div className="flex h-full w-52 bg-white xl:w-56">
+    <div className="flex h-full w-full bg-white">
       <div className="flex h-full w-full flex-col p-2.5">
         <div>
           <h2 className="mb-2 text-sm">统计概览</h2>
@@ -31,7 +41,7 @@ export function StatsPanel({ completedCount, totalCount }: StatsPanelProps) {
 
             <div className="rounded-lg border border-teal/20 bg-teal/10 p-2 transition-transform hover:scale-105">
               <Clock className="mb-1 h-4 w-4 text-teal" />
-              <div className="text-base leading-none text-teal">{totalCount - completedCount}</div>
+              <div className="text-base leading-none text-teal">{pendingCount}</div>
               <div className="mt-1 text-[11px] text-muted-foreground">进行中</div>
             </div>
           </div>
@@ -52,17 +62,18 @@ export function StatsPanel({ completedCount, totalCount }: StatsPanelProps) {
             <div className="mt-1.5 text-[11px] text-foreground/80">{focusLabel}</div>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
-            <div className="rounded-lg bg-primary/8 p-2">
-              <div className="text-[11px] text-muted-foreground">任务总数</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="rounded-lg bg-primary/8 p-1.5">
+              <div className="whitespace-nowrap text-[10px] text-muted-foreground">任务总数</div>
               <div className="mt-1 text-sm leading-none text-primary">{totalCount}</div>
             </div>
-            <div className="rounded-lg bg-emerald-50 p-2">
-              <div className="text-[11px] text-muted-foreground">完成差值</div>
-              <div className="mt-1 text-sm leading-none text-emerald-600">
-                {completedCount - pendingCount >= 0 ? "+" : ""}
-                {completedCount - pendingCount}
-              </div>
+            <div className="rounded-lg bg-emerald-50 p-1.5">
+              <div className="whitespace-nowrap text-[10px] text-muted-foreground">待完成</div>
+              <div className="mt-1 text-sm leading-none text-emerald-600">{pendingCount}</div>
+            </div>
+            <div className="rounded-lg bg-orange/12 p-1.5">
+              <div className="whitespace-nowrap text-[10px] text-muted-foreground">延迟任务</div>
+              <div className="mt-1 text-sm leading-none text-orange">{delayedCount}</div>
             </div>
           </div>
         </div>
@@ -78,8 +89,11 @@ export function StatsPanel({ completedCount, totalCount }: StatsPanelProps) {
             </div>
             <div className="text-center text-base text-coral">{completionRate}%</div>
           </div>
+          <div className="mt-2">
+            <MascotPet completionRate={completionRate} reaction={mascotReaction} />
+          </div>
         </div>
       </div>
     </div>
   );
-}
+});

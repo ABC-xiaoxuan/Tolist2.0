@@ -1,7 +1,7 @@
 {
   "name": "@figma/my-make-file",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "release:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1",
-    "release:manifest": "powershell -ExecutionPolicy Bypass -File scripts/create-latest-json.ps1"
+    "release:manifest": "powershell -ExecutionPolicy Bypass -File scripts/create-latest-json.ps1",
+    "publish:github": "powershell -ExecutionPolicy Bypass -File scripts/publish-github-release.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

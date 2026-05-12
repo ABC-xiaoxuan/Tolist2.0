@@ -157,6 +157,9 @@ export function FloatingPanel({
     return savedValue === null ? true : savedValue === "true";
   });
   const sizeAnimationRef = useRef<number | null>(null);
+  const positionSaveTimerRef = useRef<number | null>(null);
+  const queuedPositionRef = useRef<FloatingPoint | null>(null);
+  const lastPositionSaveRef = useRef(0);
   const today = new Date();
   const todayTasks = useMemo(
     () => tasks.filter((task) => isSameDay(task.date, today)),
@@ -171,6 +174,7 @@ export function FloatingPanel({
     () => (onlyPending ? pendingTasks : todayTasks),
     [onlyPending, pendingTasks, todayTasks]
   );
+  const indicatorColor = "var(--primary)";
   const completionRate =
     totalCount === 0 ? "0%" : `${Math.round((completedCount / totalCount) * 100)}%`;
   const presetTheme =
@@ -189,8 +193,28 @@ export function FloatingPanel({
         }
       : presetTheme;
 
-  const saveFloatingPosition = (position: FloatingPoint) => {
-    window.localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(position));
+  const flushFloatingPosition = () => {
+    if (!queuedPositionRef.current) {
+      return;
+    }
+
+    window.localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(queuedPositionRef.current));
+    queuedPositionRef.current = null;
+    positionSaveTimerRef.current = null;
+    lastPositionSaveRef.current = performance.now();
+  };
+
+  const scheduleFloatingPositionSave = (position: FloatingPoint) => {
+    queuedPositionRef.current = position;
+
+    if (performance.now() - lastPositionSaveRef.current > 180) {
+      flushFloatingPosition();
+      return;
+    }
+
+    if (positionSaveTimerRef.current === null) {
+      positionSaveTimerRef.current = window.setTimeout(flushFloatingPosition, 180);
+    }
   };
 
   useEffect(() => {
@@ -287,12 +311,17 @@ export function FloatingPanel({
     let unlisten: (() => void) | undefined;
     void currentWindow.onMoved(({ payload }) => {
       const currentPosition = { x: payload.x, y: payload.y };
-      saveFloatingPosition(currentPosition);
+      scheduleFloatingPositionSave(currentPosition);
     }).then((dispose) => {
       unlisten = dispose;
     });
 
     return () => {
+      if (positionSaveTimerRef.current !== null) {
+        window.clearTimeout(positionSaveTimerRef.current);
+        positionSaveTimerRef.current = null;
+      }
+      flushFloatingPosition();
       unlisten?.();
     };
   }, []);
@@ -521,7 +550,7 @@ export function FloatingPanel({
                     <button
                       key={task.id}
                       onClick={() => void onToggle(task.id)}
-                      className="flex w-full items-start gap-2.5 rounded-2xl px-3 py-2.5 text-left shadow-sm ring-1 ring-black/5 transition-all hover:-translate-y-0.5 hover:scale-[1.01] active:scale-[0.98]"
+                      className="flex w-full select-none items-start gap-2.5 rounded-2xl px-3 py-2.5 text-left shadow-sm ring-1 ring-black/5 transition-all hover:-translate-y-0.5 hover:scale-[1.01] active:scale-[0.98]"
                       style={{
                         backgroundColor: task.completed ? theme.surfaceAlt : theme.surface,
                         color: task.completed ? "#94a3b8" : "#0f172a",
@@ -530,8 +559,8 @@ export function FloatingPanel({
                       <div
                         className="mt-0.5 flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full border"
                         style={{
-                          borderColor: task.colorHex,
-                          backgroundColor: task.completed ? task.colorHex : "transparent",
+                          borderColor: indicatorColor,
+                          backgroundColor: task.completed ? indicatorColor : "transparent",
                         }}
                       >
                         {task.completed && <Check className="h-3 w-3 text-white" />}
@@ -541,21 +570,17 @@ export function FloatingPanel({
                           {task.title}
                         </div>
                         <div className="mt-1 flex items-center gap-1.5">
+                          {task.delayed && (
+                            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] text-orange-600">
+                              延迟任务
+                            </span>
+                          )}
                           {task.category && (
                             <span
                               className="rounded-full px-2 py-0.5 text-[10px]"
                               style={{ backgroundColor: `${task.colorHex}1f`, color: task.colorHex }}
                             >
                               {task.category}
-                            </span>
-                          )}
-                          {task.priority && (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
-                              {task.priority === "high"
-                                ? "高优先级"
-                                : task.priority === "medium"
-                                  ? "中优先级"
-                                  : "低优先级"}
                             </span>
                           )}
                         </div>

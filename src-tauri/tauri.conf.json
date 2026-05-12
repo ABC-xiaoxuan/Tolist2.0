@@ -1,7 +1,7 @@
 {
   "$schema": "./gen/schemas/desktop-schema.json",
   "productName": "ToList Desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.xiaoxuan.tolistdesktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,9 +28,9 @@
       {
         "label": "main",
         "title": "我的待办",
-        "width": 960,
+        "width": 820,
         "height": 660,
-        "minWidth": 760,
+        "minWidth": 640,
         "minHeight": 520,
         "resizable": true,
         "fullscreen": false,

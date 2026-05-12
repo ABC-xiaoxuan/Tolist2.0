@@ -35,5 +35,7 @@ $latest = [ordered]@{
 }
 
 $latestPath = Join-Path $bundleDir "latest.json"
-$latest | ConvertTo-Json -Depth 8 | Set-Content -Path $latestPath -Encoding UTF8
+$latestJson = $latest | ConvertTo-Json -Depth 8
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($latestPath, $latestJson, $utf8NoBom)
 Write-Host "Generated $latestPath"

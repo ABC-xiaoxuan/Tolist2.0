@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo } from "react";
 import { TaskCard } from "./task-card";
 import { Task } from "../types";
 import { format } from "date-fns";
@@ -12,16 +12,7 @@ interface DayViewProps {
   selectedDate: Date;
 }
 
-const TIME_SLOTS = ["高优先级", "中优先级", "低优先级", "未设置优先级"] as const;
-
-export function DayView({ tasks, onToggle, onDelete, onEdit, selectedDate }: DayViewProps) {
-  const groupedTasks = useMemo(() => ({
-    "高优先级": tasks.filter((t) => t.priority === "high"),
-    "中优先级": tasks.filter((t) => t.priority === "medium"),
-    "低优先级": tasks.filter((t) => t.priority === "low"),
-    "未设置优先级": tasks.filter((t) => !t.priority),
-  }), [tasks]);
-
+export const DayView = memo(function DayView({ tasks, onToggle, onDelete, onEdit, selectedDate }: DayViewProps) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
@@ -31,40 +22,28 @@ export function DayView({ tasks, onToggle, onDelete, onEdit, selectedDate }: Day
         </div>
       </div>
 
-      {TIME_SLOTS.map((slot, idx) => {
-        const slotTasks = groupedTasks[slot];
-        return (
-          <div
-            key={slot}
-            className="animate-in fade-in slide-in-from-bottom-2"
-            style={{ animationDelay: `${idx * 35}ms` }}
-          >
-            <div className="mb-1 flex items-center gap-1.5">
-              <div className="h-2 w-2 flex-shrink-0 rounded-full bg-primary" />
-              <h3 className="text-xs text-muted-foreground">{slot}</h3>
-              <div className="h-px flex-1 bg-border" />
+      <div className="space-y-1.5">
+        {tasks.length > 0 ? (
+          tasks.map((task, idx) => (
+            <div
+              key={task.id}
+              className="animate-in fade-in slide-in-from-bottom-2"
+              style={{ animationDelay: `${idx * 35}ms` }}
+            >
+              <TaskCard
+                task={task}
+                onToggle={onToggle}
+                onDelete={onDelete}
+                onEdit={onEdit}
+              />
             </div>
-
-            <div className="space-y-1 pl-2">
-              {slotTasks.length > 0 ? (
-                slotTasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    onToggle={onToggle}
-                    onDelete={onDelete}
-                    onEdit={onEdit}
-                  />
-                ))
-              ) : (
-                <div className="py-1 text-center text-xs italic text-muted-foreground">
-                  暂无任务
-                </div>
-              )}
-            </div>
+          ))
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-white px-4 py-6 text-center text-sm text-muted-foreground">
+            这一天还没有待办任务
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
-}
+});
