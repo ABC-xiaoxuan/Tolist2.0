@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "release:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1",
+    "release:mac": "bash scripts/build-mac-release.sh",
     "release:manifest": "powershell -ExecutionPolicy Bypass -File scripts/create-latest-json.ps1",
     "publish:github": "powershell -ExecutionPolicy Bypass -File scripts/publish-github-release.ps1"
   },

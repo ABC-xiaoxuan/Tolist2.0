@@ -77,6 +77,20 @@ npm run tauri build
 npm run release:windows
 ```
 
+构建 macOS 应用和 DMG 安装包（需要在 macOS 上执行）：
+
+```bash
+npm run release:mac
+```
+
+如果存在 `.tauri/updater.key`，脚本会同时生成更新器签名产物；如果没有该密钥，脚本会跳过 updater artifacts，只生成可安装的 `.app` / `.dmg`。
+
+如需构建 Apple Silicon / Intel 通用包，可先安装 Rust 的两个 macOS target，然后执行：
+
+```bash
+npm run release:mac -- --target universal-apple-darwin
+```
+
 生成更新清单：
 
 ```bash
