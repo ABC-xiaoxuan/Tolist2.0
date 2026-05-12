@@ -8,6 +8,13 @@ $nsisDir = Join-Path $bundleDir "nsis"
 
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
 $version = $config.version
+$tag = "v$version"
+$notesPath = Join-Path $root "release-notes\$tag.md"
+$releaseNotes = if (Test-Path $notesPath) {
+  (Get-Content $notesPath -Raw -Encoding UTF8).Trim()
+} else {
+  "ToList Desktop $version"
+}
 $installerName = "ToList Desktop_${version}_x64-setup.exe"
 $installerPath = Join-Path $nsisDir $installerName
 $signaturePath = "$installerPath.sig"
@@ -24,7 +31,7 @@ $githubInstallerName = $installerName -replace " ", "."
 $signature = (Get-Content $signaturePath -Raw).Trim()
 $latest = [ordered]@{
   version = $version
-  notes = "ToList Desktop $version"
+  notes = $releaseNotes
   pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   platforms = [ordered]@{
     "windows-x86_64" = [ordered]@{

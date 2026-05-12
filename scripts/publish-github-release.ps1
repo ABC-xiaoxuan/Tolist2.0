@@ -24,7 +24,12 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 
 $tag = "v$version"
 $releaseTitle = $tag
-$releaseNotes = "ToList Desktop $version"
+$notesPath = Join-Path $root "release-notes\$tag.md"
+$releaseNotes = if (Test-Path $notesPath) {
+  (Get-Content $notesPath -Raw -Encoding UTF8).Trim()
+} else {
+  "ToList Desktop $version"
+}
 
 $installerName = "ToList Desktop_${version}_x64-setup.exe"
 $installerPath = Join-Path $nsisDir $installerName

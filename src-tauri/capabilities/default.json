@@ -26,6 +26,7 @@
     "core:window:allow-unmaximize",
     "dialog:default",
     "fs:default",
+    "notification:default",
     "updater:default",
     "sql:default",
     "sql:allow-execute"

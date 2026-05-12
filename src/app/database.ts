@@ -8,6 +8,7 @@ import {
   TaskDraft,
   WeeklyStat,
 } from "./types";
+import { normalizeReminderMode } from "./reminders";
 
 const DB_URL = "sqlite:tasks.db";
 
@@ -22,6 +23,9 @@ type TaskRow = {
   color_hex: string;
   task_date: string;
   is_delayed: number;
+  due_at: string | null;
+  reminder_mode: string | null;
+  reminder_at: string | null;
 };
 
 type SummaryRow = {
@@ -71,6 +75,9 @@ function mapRowToTask(row: TaskRow): Task {
     colorHex: row.color_hex,
     date: dateValue,
     delayed: Boolean(row.is_delayed),
+    dueAt: row.due_at ?? undefined,
+    reminderMode: normalizeReminderMode(row.reminder_mode),
+    reminderAt: row.reminder_at ?? undefined,
   };
 }
 
@@ -84,6 +91,9 @@ function mapDraftToBindValues(taskDraft: TaskDraft) {
     taskDraft.colorHex,
     taskDraft.date,
     "medium",
+    taskDraft.reminderAt?.trim() || null,
+    taskDraft.dueAt?.trim() || null,
+    taskDraft.reminderMode ?? "none",
   ];
 }
 
@@ -100,7 +110,10 @@ export async function listTasks() {
       color,
       color_hex,
       task_date,
-      is_delayed
+      is_delayed,
+      due_at,
+      reminder_mode,
+      reminder_at
     FROM tasks
     ORDER BY
       CASE
@@ -126,7 +139,10 @@ export async function listTasksByDate(dateKey: string) {
       color,
       color_hex,
       task_date,
-      is_delayed
+      is_delayed,
+      due_at,
+      reminder_mode,
+      reminder_at
     FROM tasks
     WHERE
       task_date = ?
@@ -260,8 +276,11 @@ export async function createTask(taskDraft: TaskDraft) {
       color,
       color_hex,
       task_date,
-      priority
-    ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+      priority,
+      reminder_at,
+      due_at,
+      reminder_mode
+    ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, ...mapDraftToBindValues(taskDraft)]
   );
 
@@ -281,6 +300,9 @@ export async function updateTask(id: string, taskDraft: TaskDraft) {
       color_hex = ?,
       task_date = ?,
       priority = ?,
+      reminder_at = ?,
+      due_at = ?,
+      reminder_mode = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
     [...mapDraftToBindValues(taskDraft), id]
@@ -316,6 +338,7 @@ export async function seedExampleTasks() {
       color: "coral",
       colorHex: "#FF6B6B",
       date: getTaskDateKey(today),
+      reminderMode: "none",
     },
     {
       title: "团队会议",
@@ -324,6 +347,7 @@ export async function seedExampleTasks() {
       color: "teal",
       colorHex: "#26C6DA",
       date: getTaskDateKey(today),
+      reminderMode: "none",
     },
     {
       title: "健身房训练",
@@ -332,6 +356,7 @@ export async function seedExampleTasks() {
       color: "purple",
       colorHex: "#A78BFA",
       date: getTaskDateKey(today),
+      reminderMode: "none",
     },
     {
       title: "阅读技术文章",
@@ -340,6 +365,7 @@ export async function seedExampleTasks() {
       color: "yellow",
       colorHex: "#FFF59D",
       date: getTaskDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)),
+      reminderMode: "none",
     },
     {
       title: "代码评审",
@@ -348,14 +374,15 @@ export async function seedExampleTasks() {
       color: "orange",
       colorHex: "#FB923C",
       date: getTaskDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2)),
+      reminderMode: "none",
     },
   ];
 
-  const placeholders = samples.map(() => "(?, ?, ?, 0, ?, ?, ?, ?, ?, ?)").join(", ");
+  const placeholders = samples.map(() => "(?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
   const values = samples.flatMap((s) => [crypto.randomUUID(), ...mapDraftToBindValues(s)]);
 
   await db.execute(
-    `INSERT INTO tasks (id, title, description, completed, time, category, color, color_hex, task_date, priority) VALUES ${placeholders}`,
+    `INSERT INTO tasks (id, title, description, completed, time, category, color, color_hex, task_date, priority, reminder_at, due_at, reminder_mode) VALUES ${placeholders}`,
     values
   );
 }

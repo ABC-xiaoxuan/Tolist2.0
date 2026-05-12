@@ -1,3 +1,5 @@
+export type ReminderMode = "none" | "due" | "5m" | "30m" | "custom";
+
 export interface Task {
   id: string;
   title: string;
@@ -9,6 +11,9 @@ export interface Task {
   colorHex: string;
   date: Date;
   delayed: boolean;
+  dueAt?: string;
+  reminderMode: ReminderMode;
+  reminderAt?: string;
 }
 
 export interface TaskDraft {
@@ -18,6 +23,9 @@ export interface TaskDraft {
   color: string;
   colorHex: string;
   date: string;
+  dueAt?: string;
+  reminderMode: ReminderMode;
+  reminderAt?: string;
 }
 
 export interface WeeklyStat {

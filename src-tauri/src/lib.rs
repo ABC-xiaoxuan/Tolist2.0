@@ -69,10 +69,35 @@ pub fn run() {
             "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "add_task_reminder_time",
+            sql: r#"
+              ALTER TABLE tasks ADD COLUMN reminder_at TEXT;
+              CREATE INDEX IF NOT EXISTS idx_tasks_reminder_at ON tasks(reminder_at);
+            "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "add_task_due_reminder_options",
+            sql: r#"
+              ALTER TABLE tasks ADD COLUMN due_at TEXT;
+              ALTER TABLE tasks ADD COLUMN reminder_mode TEXT NOT NULL DEFAULT 'none';
+              UPDATE tasks
+                SET due_at = reminder_at,
+                    reminder_mode = 'custom'
+                WHERE reminder_at IS NOT NULL AND TRIM(reminder_at) <> '';
+              CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
+              CREATE INDEX IF NOT EXISTS idx_tasks_reminder_mode ON tasks(reminder_mode);
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

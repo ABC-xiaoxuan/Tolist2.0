@@ -1,7 +1,13 @@
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import type { Task, TaskDraft } from "../types";
+import {
+  computeReminderAt,
+  formatDateTimeInputValue,
+  formatReminderText,
+  REMINDER_MODE_LABELS,
+} from "../reminders";
+import type { ReminderMode, Task, TaskDraft } from "../types";
 
 const COLORS = [
   { name: "coral", hex: "#FF6B6B" },
@@ -10,6 +16,8 @@ const COLORS = [
   { name: "purple", hex: "#A78BFA" },
   { name: "orange", hex: "#FB923C" },
 ];
+
+const REMINDER_OPTIONS: ReminderMode[] = ["none", "due", "5m", "30m", "custom"];
 
 function formatInputDate(date: Date) {
   const year = date.getFullYear();
@@ -40,6 +48,9 @@ export function TaskModal({
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [date, setDate] = useState(formatInputDate(initialDate));
+  const [dueAt, setDueAt] = useState("");
+  const [reminderMode, setReminderMode] = useState<ReminderMode>("none");
+  const [reminderAt, setReminderAt] = useState("");
   const [selectedColor, setSelectedColor] = useState(defaultColor);
   const [showAdvanced, setShowAdvanced] = useState(mode === "edit");
 
@@ -53,6 +64,9 @@ export function TaskModal({
       setDescription(task.description ?? "");
       setCategory(task.category ?? "");
       setDate(formatInputDate(task.date));
+      setDueAt(formatDateTimeInputValue(task.dueAt));
+      setReminderMode(task.reminderMode);
+      setReminderAt(task.reminderMode === "custom" ? formatDateTimeInputValue(task.reminderAt) : "");
       setShowAdvanced(true);
       setSelectedColor({
         name: task.color,
@@ -65,15 +79,42 @@ export function TaskModal({
     setDescription("");
     setCategory("");
     setDate(formatInputDate(initialDate));
+    setDueAt("");
+    setReminderMode("none");
+    setReminderAt("");
     setShowAdvanced(false);
     setSelectedColor(defaultColor);
   }, [defaultColor, initialDate, isOpen, mode, task]);
+
+  const previewReminderAt = computeReminderAt(
+    dueAt || undefined,
+    reminderMode,
+    reminderAt || undefined
+  );
+
+  const handleDueAtChange = (value: string) => {
+    setDueAt(value);
+    if (value) {
+      setDate(value.slice(0, 10));
+      if (reminderMode === "none") {
+        setReminderMode("due");
+      }
+    } else if (reminderMode !== "custom") {
+      setReminderMode("none");
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) {
       return;
     }
+
+    const finalReminderAt = computeReminderAt(
+      dueAt || undefined,
+      reminderMode,
+      reminderAt || undefined
+    );
 
     await onSubmit({
       title,
@@ -82,6 +123,9 @@ export function TaskModal({
       color: selectedColor.name,
       colorHex: selectedColor.hex,
       date,
+      dueAt: dueAt || undefined,
+      reminderMode: finalReminderAt ? reminderMode : "none",
+      reminderAt: finalReminderAt,
     });
 
     onClose();
@@ -163,6 +207,81 @@ export function TaskModal({
                         />
                       </div>
                     )}
+
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1.5 text-sm">
+                        <Bell className="h-3.5 w-3.5 text-primary" />
+                        任务到期时间（可选）
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="datetime-local"
+                          value={dueAt}
+                          onChange={(event) => handleDueAtChange(event.target.value)}
+                          className="min-w-0 flex-1 rounded-lg border border-border px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-primary"
+                        />
+                        {dueAt && (
+                          <button
+                            type="button"
+                            onClick={() => handleDueAtChange("")}
+                            className="rounded-lg border border-border px-3 text-[12px] text-muted-foreground transition-all hover:bg-muted hover:text-foreground active:scale-95"
+                          >
+                            清除
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm">到期提醒</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {REMINDER_OPTIONS.map((option) => {
+                          const isPresetDisabled = option !== "none" && option !== "custom" && !dueAt;
+
+                          return (
+                            <button
+                              key={option}
+                              type="button"
+                              disabled={isPresetDisabled}
+                              onClick={() => setReminderMode(option)}
+                              className={`rounded-lg border px-3 py-2 text-[12px] transition-all active:scale-95 ${
+                                reminderMode === option
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground"
+                              } ${isPresetDisabled ? "cursor-not-allowed opacity-45 hover:bg-white hover:text-muted-foreground" : ""}`}
+                            >
+                              {REMINDER_MODE_LABELS[option]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {reminderMode === "custom" && (
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            type="datetime-local"
+                            value={reminderAt}
+                            onChange={(event) => setReminderAt(event.target.value)}
+                            className="min-w-0 flex-1 rounded-lg border border-border px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-primary"
+                          />
+                          {reminderAt && (
+                            <button
+                              type="button"
+                              onClick={() => setReminderAt("")}
+                              className="rounded-lg border border-border px-3 text-[12px] text-muted-foreground transition-all hover:bg-muted hover:text-foreground active:scale-95"
+                            >
+                              清除
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <p className="mt-1.5 text-[12px] leading-5 text-muted-foreground">
+                        {previewReminderAt
+                          ? `实际提醒：${formatReminderText(previewReminderAt)}。请保持应用在后台运行。`
+                          : dueAt
+                            ? "已设置到期时间，选择提醒方式后会通过系统通知提醒。"
+                            : "设置到期时间后可选择准时、提前 5 分钟或提前 30 分钟提醒。"}
+                      </p>
+                    </div>
 
                     <div>
                       <label className="mb-1.5 block text-sm">分类</label>

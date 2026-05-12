@@ -1,5 +1,6 @@
 import { memo } from "react";
-import { Check, Pencil, Trash2 } from "lucide-react";
+import { Bell, Check, Pencil, Trash2 } from "lucide-react";
+import { formatReminderText, REMINDER_MODE_LABELS } from "../reminders";
 import { Task } from "../types";
 
 interface TaskCardProps {
@@ -11,6 +12,8 @@ interface TaskCardProps {
 
 export const TaskCard = memo(function TaskCard({ task, onToggle, onDelete, onEdit }: TaskCardProps) {
   const indicatorColor = "var(--primary)";
+  const dueLabel = formatReminderText(task.dueAt);
+  const reminderLabel = formatReminderText(task.reminderAt);
 
   return (
     <div
@@ -61,6 +64,17 @@ export const TaskCard = memo(function TaskCard({ task, onToggle, onDelete, onEdi
                 style={{ backgroundColor: `${task.colorHex}20`, color: task.colorHex }}
               >
                 {task.category}
+              </span>
+            )}
+            {dueLabel && (
+              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                到期 {dueLabel}
+              </span>
+            )}
+            {reminderLabel && !task.completed && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-1.5 py-0.5 text-[11px] text-primary">
+                <Bell className="h-3 w-3" />
+                {REMINDER_MODE_LABELS[task.reminderMode]} · {reminderLabel}
               </span>
             )}
           </div>

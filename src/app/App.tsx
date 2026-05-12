@@ -9,6 +9,7 @@ import { confirm, message, save } from "@tauri-apps/plugin-dialog";
 import packageJson from "../../package.json";
 import { ViewSwitcher } from "./components/view-switcher";
 import { DayView } from "./components/day-view";
+import { formatReminderText, parseReminderAt, REMINDER_MODE_LABELS } from "./reminders";
 import { DashboardStats, MascotReaction, Task, TaskDraft, ViewType } from "./types";
 import {
   backupDatabase,
@@ -30,6 +31,8 @@ const FLOATING_POSITION_KEY = "floating-panel-position";
 const HITOKOTO_ENDPOINT = "https://v1.hitokoto.cn/?c=f&encode=text";
 const AUTO_UPDATE_CHECK_DELAY = 3500;
 const MAIN_THEME_COLOR_KEY = "main-theme-color";
+const REMINDER_NOTIFIED_KEYS_KEY = "task-reminder-notified-keys";
+const MAX_TIMER_DELAY = 2_147_000_000;
 const WeekView = lazy(() => import("./components/week-view").then((module) => ({ default: module.WeekView })));
 const MonthView = lazy(() => import("./components/month-view").then((module) => ({ default: module.MonthView })));
 const StatsPanel = lazy(() => import("./components/stats-panel").then((module) => ({ default: module.StatsPanel })));
@@ -102,6 +105,28 @@ function getDelayUntilNextLocalDay() {
   return Math.max(nextDay.getTime() - now.getTime(), 1000);
 }
 
+function getTaskReminderKey(task: Pick<Task, "id" | "reminderAt">) {
+  return task.reminderAt ? `${task.id}:${task.reminderAt}` : null;
+}
+
+function readNotifiedReminderKeys() {
+  if (typeof window === "undefined") {
+    return new Set<string>();
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(REMINDER_NOTIFIED_KEYS_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    window.localStorage.removeItem(REMINDER_NOTIFIED_KEYS_KEY);
+    return new Set<string>();
+  }
+}
+
+function persistNotifiedReminderKeys(keys: Set<string>) {
+  window.localStorage.setItem(REMINDER_NOTIFIED_KEYS_KEY, JSON.stringify([...keys].slice(-300)));
+}
+
 export default function App() {
   const windowRef = useRef(getCurrentWindow());
   const isFloatingWindow = windowRef.current.label === "floating";
@@ -128,6 +153,7 @@ export default function App() {
   });
   const [tasks, setTasks] = useState<Task[]>([]);
   const tasksRef = useRef<Task[]>([]);
+  const notifiedReminderKeysRef = useRef<Set<string>>(readNotifiedReminderKeys());
   const [stats, setStats] = useState<DashboardStats>({
     totalCount: 0,
     completedCount: 0,
@@ -348,6 +374,131 @@ export default function App() {
     await emit(TASKS_UPDATED_EVENT, { source: windowRef.current.label } satisfies TasksUpdatedEventPayload);
   }, []);
 
+  const ensureNotificationPermission = useCallback(async () => {
+    const { isPermissionGranted, requestPermission } = await import("@tauri-apps/plugin-notification");
+    if (await isPermissionGranted()) {
+      return true;
+    }
+
+    return (await requestPermission()) === "granted";
+  }, []);
+
+  const sendTaskReminder = useCallback(async (task: Task) => {
+    const reminderKey = getTaskReminderKey(task);
+    if (!reminderKey || notifiedReminderKeysRef.current.has(reminderKey) || task.completed) {
+      return;
+    }
+
+    try {
+      const [{ sendNotification }, permissionGranted] = await Promise.all([
+        import("@tauri-apps/plugin-notification"),
+        ensureNotificationPermission(),
+      ]);
+
+      if (permissionGranted) {
+        const dueText = task.dueAt ? `到期时间：${formatReminderText(task.dueAt)}` : "";
+        const descriptionText = task.description ? `\n${task.description}` : "";
+        sendNotification({
+          title: "待办提醒",
+          body: `${task.title}${dueText ? `\n${dueText}` : ""}\n提醒方式：${REMINDER_MODE_LABELS[task.reminderMode]}${descriptionText}`,
+        });
+      } else {
+        setErrorMessage("提醒时间已到，但系统通知权限未开启。");
+      }
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "任务提醒发送失败"));
+    } finally {
+      notifiedReminderKeysRef.current.add(reminderKey);
+      persistNotifiedReminderKeys(notifiedReminderKeysRef.current);
+    }
+  }, [ensureNotificationPermission]);
+
+  useEffect(() => {
+    if (isFloatingWindow) {
+      return;
+    }
+
+    const activeReminderKeys = new Set(
+      tasks.map(getTaskReminderKey).filter((key): key is string => Boolean(key))
+    );
+    let changed = false;
+
+    for (const reminderKey of notifiedReminderKeysRef.current) {
+      if (!activeReminderKeys.has(reminderKey)) {
+        notifiedReminderKeysRef.current.delete(reminderKey);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      persistNotifiedReminderKeys(notifiedReminderKeysRef.current);
+    }
+  }, [isFloatingWindow, tasks]);
+
+  useEffect(() => {
+    if (isFloatingWindow) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    const scheduleNextReminder = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+        timerId = undefined;
+      }
+
+      const now = Date.now();
+      const pendingReminders = tasksRef.current
+        .map((task) => {
+          const reminderDate = parseReminderAt(task.reminderAt);
+          const reminderKey = getTaskReminderKey(task);
+
+          return reminderDate && reminderKey
+            ? { task, reminderKey, time: reminderDate.getTime() }
+            : null;
+        })
+        .filter((item): item is { task: Task; reminderKey: string; time: number } =>
+          Boolean(item) &&
+          !item.task.completed &&
+          !notifiedReminderKeysRef.current.has(item.reminderKey)
+        )
+        .sort((a, b) => a.time - b.time);
+
+      const dueReminders = pendingReminders.filter((item) => item.time <= now + 500);
+      if (dueReminders.length > 0) {
+        void Promise.all(dueReminders.map((item) => sendTaskReminder(item.task))).finally(() => {
+          scheduleNextReminder();
+        });
+        return;
+      }
+
+      const nextReminder = pendingReminders[0];
+      if (!nextReminder) {
+        return;
+      }
+
+      timerId = window.setTimeout(
+        scheduleNextReminder,
+        Math.min(Math.max(nextReminder.time - now, 1000), MAX_TIMER_DELAY)
+      );
+    };
+
+    scheduleNextReminder();
+
+    return () => {
+      cancelled = true;
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [isFloatingWindow, sendTaskReminder, tasks]);
+
   useEffect(() => {
     let cancelled = false;
     let timerId: number | undefined;
@@ -459,6 +610,17 @@ export default function App() {
   const handleAddTask = useCallback(async (newTask: TaskDraft) => {
     try {
       const isEditing = taskModalMode === "edit" && editingTask;
+      let reminderNotice: string | null = null;
+
+      if (newTask.reminderAt) {
+        try {
+          if (!(await ensureNotificationPermission())) {
+            reminderNotice = "提醒时间已保存，但系统通知权限未开启。";
+          }
+        } catch (error) {
+          reminderNotice = getErrorMessage(error, "提醒时间已保存，但通知权限请求失败。");
+        }
+      }
 
       if (taskModalMode === "edit" && editingTask) {
         await updateTask(editingTask.id, newTask);
@@ -473,13 +635,13 @@ export default function App() {
         setMascotReaction({ type: "task-added", token: Date.now() });
       }
       await notifyTasksUpdated();
-      setErrorMessage(null);
+      setErrorMessage(reminderNotice);
     } catch (error) {
       const message = error instanceof Error ? error.message : "任务创建失败";
       setErrorMessage(message);
       throw error instanceof Error ? error : new Error(message);
     }
-  }, [taskModalMode, editingTask, refreshData, notifyTasksUpdated]);
+  }, [taskModalMode, editingTask, ensureNotificationPermission, refreshData, notifyTasksUpdated]);
 
   const completedCount = stats.completedCount;
   const totalCount = stats.totalCount;

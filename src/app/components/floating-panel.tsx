@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { Check, ChevronDown, EyeOff, House, ListTodo, Palette, Pin, X } from "lucide-react";
+import { Bell, Check, ChevronDown, EyeOff, House, ListTodo, Palette, Pin, X } from "lucide-react";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { isSameDay } from "date-fns";
+import { formatReminderText, REMINDER_MODE_LABELS } from "../reminders";
 import { Task } from "../types";
 
 const FLOATING_COLLAPSED_KEY = "floating-panel-collapsed";
@@ -644,6 +645,20 @@ export function FloatingPanel({
                               style={{ backgroundColor: `${task.colorHex}1f`, color: task.colorHex }}
                             >
                               {task.category}
+                            </span>
+                          )}
+                          {task.dueAt && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
+                              到期 {formatReminderText(task.dueAt, true)}
+                            </span>
+                          )}
+                          {task.reminderAt && !task.completed && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
+                              style={{ backgroundColor: rgbaFromHex(theme.accent, 0.12), color: theme.accent }}
+                            >
+                              <Bell className="h-3 w-3" />
+                              {REMINDER_MODE_LABELS[task.reminderMode]} {formatReminderText(task.reminderAt, true)}
                             </span>
                           )}
                         </div>
