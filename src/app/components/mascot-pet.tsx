@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MascotReaction, MascotReactionType } from "../types";
-import mascotSprite from "../../assets/mascot-sprite.png";
+import mascotSprite from "../../assets/mascot-sprite-pixel.png";
 
 interface MascotPetProps {
   completionRate: number;
@@ -15,6 +15,7 @@ const reactionText: Record<MascotReactionType, string> = {
   "task-deleted": "任务收纳好了",
   "tasks-cleared": "清爽重启",
   "examples-loaded": "样例已就位",
+  "break-reminder": "起来活动一下",
   "pet-touched": "我在这里",
 };
 
@@ -29,6 +30,7 @@ const reactionFrames: Record<MascotReactionType, number[]> = {
   "task-deleted": [5, 6, 5, 0],
   "tasks-cleared": [8, 9, 8, 0],
   "examples-loaded": [13, 7, 2, 0],
+  "break-reminder": [1, 10, 11, 4, 1],
   "pet-touched": [1, 10, 11, 4, 1],
 };
 
@@ -40,6 +42,7 @@ const reactionDuration: Record<MascotReactionType, number> = {
   "task-deleted": 1400,
   "tasks-cleared": 1450,
   "examples-loaded": 1550,
+  "break-reminder": 1700,
   "pet-touched": 1650,
 };
 
@@ -51,6 +54,7 @@ const frameAnimationName: Record<MascotReactionType, string> = {
   "task-deleted": "mascotFramesTaskDeleted",
   "tasks-cleared": "mascotFramesTasksCleared",
   "examples-loaded": "mascotFramesExamplesLoaded",
+  "break-reminder": "mascotFramesBreakReminder",
   "pet-touched": "mascotFramesPetTouched",
 };
 
@@ -215,6 +219,7 @@ export function MascotPet({ completionRate, reaction }: MascotPetProps) {
                 backgroundPosition: getFramePosition(reactionFrames[visualType][0] ?? 0),
                 backgroundSize: `${spriteColumns * 100}% ${spriteRows * 100}%`,
                 animation: frameAnimation,
+                imageRendering: "pixelated",
               }}
             />
           </div>

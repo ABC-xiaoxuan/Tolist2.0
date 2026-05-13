@@ -49,6 +49,24 @@ export interface DashboardStats {
 
 export type ViewType = "day" | "week" | "month";
 
+export type UpdateProgressPhase =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "installing"
+  | "restarting"
+  | "done"
+  | "error";
+
+export interface UpdateProgressState {
+  phase: UpdateProgressPhase;
+  version?: string;
+  downloadedBytes: number;
+  totalBytes?: number;
+  message: string;
+}
+
 export type MascotReactionType =
   | "idle"
   | "task-added"
@@ -57,6 +75,7 @@ export type MascotReactionType =
   | "task-deleted"
   | "tasks-cleared"
   | "examples-loaded"
+  | "break-reminder"
   | "pet-touched";
 
 export interface MascotReaction {

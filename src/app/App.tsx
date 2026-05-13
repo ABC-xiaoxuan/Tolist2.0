@@ -1,16 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, Minimize2, Minus, Plus, Settings2, X, PanelTopOpen } from "lucide-react";
+import { Maximize2, Minimize2, Minus, Plus, Settings2, Sparkles, X, PanelTopOpen } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { availableMonitors, currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { confirm, message, save } from "@tauri-apps/plugin-dialog";
+import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 import packageJson from "../../package.json";
 import { ViewSwitcher } from "./components/view-switcher";
 import { DayView } from "./components/day-view";
 import { formatReminderText, parseReminderAt, REMINDER_MODE_LABELS } from "./reminders";
-import { DashboardStats, MascotReaction, Task, TaskDraft, ViewType } from "./types";
+import { DashboardStats, MascotReaction, MascotReactionType, Task, TaskDraft, UpdateProgressState, ViewType } from "./types";
 import {
   backupDatabase,
   clearTasks,
@@ -27,16 +28,24 @@ import {
 } from "./database";
 
 const TASKS_UPDATED_EVENT = "tasks-updated";
+const MASCOT_REACTION_EVENT = "mascot-reaction";
 const FLOATING_POSITION_KEY = "floating-panel-position";
 const HITOKOTO_ENDPOINT = "https://v1.hitokoto.cn/?c=f&encode=text";
 const AUTO_UPDATE_CHECK_DELAY = 3500;
 const MAIN_THEME_COLOR_KEY = "main-theme-color";
 const REMINDER_NOTIFIED_KEYS_KEY = "task-reminder-notified-keys";
 const MAX_TIMER_DELAY = 2_147_000_000;
+const BREAK_REMINDER_INTERVAL_MS = 50 * 60 * 1000;
+const IDLE_UPDATE_PROGRESS: UpdateProgressState = {
+  phase: "idle",
+  downloadedBytes: 0,
+  message: "",
+};
 const WeekView = lazy(() => import("./components/week-view").then((module) => ({ default: module.WeekView })));
 const MonthView = lazy(() => import("./components/month-view").then((module) => ({ default: module.MonthView })));
 const StatsPanel = lazy(() => import("./components/stats-panel").then((module) => ({ default: module.StatsPanel })));
 const FloatingPanel = lazy(() => import("./components/floating-panel").then((module) => ({ default: module.FloatingPanel })));
+const DesktopMascot = lazy(() => import("./components/desktop-mascot").then((module) => ({ default: module.DesktopMascot })));
 const DateTasksModal = lazy(() => import("./components/date-tasks-modal").then((module) => ({ default: module.DateTasksModal })));
 const TaskModal = lazy(() => import("./components/task-modal").then((module) => ({ default: module.TaskModal })));
 const ToolsModal = lazy(() => import("./components/tools-modal").then((module) => ({ default: module.ToolsModal })));
@@ -130,6 +139,8 @@ function persistNotifiedReminderKeys(keys: Set<string>) {
 export default function App() {
   const windowRef = useRef(getCurrentWindow());
   const isFloatingWindow = windowRef.current.label === "floating";
+  const isMascotWindow = windowRef.current.label === "mascot";
+  const isAuxiliaryWindow = isFloatingWindow || isMascotWindow;
   const [view, setView] = useState<ViewType>("day");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -138,6 +149,7 @@ export default function App() {
   const [previewDate, setPreviewDate] = useState<Date | null>(null);
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgressState>(IDLE_UPDATE_PROGRESS);
   const [isMainWindowMaximized, setIsMainWindowMaximized] = useState(false);
   const [appVersion, setAppVersion] = useState(packageJson.version);
   const [mascotReaction, setMascotReaction] = useState<MascotReaction>({
@@ -154,6 +166,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const tasksRef = useRef<Task[]>([]);
   const notifiedReminderKeysRef = useRef<Set<string>>(readNotifiedReminderKeys());
+  const breakReminderLastAtRef = useRef(Date.now());
   const [stats, setStats] = useState<DashboardStats>({
     totalCount: 0,
     completedCount: 0,
@@ -189,25 +202,39 @@ export default function App() {
   };
 
   const loadTasksForCurrentWindow = useCallback(() => {
+    if (isMascotWindow) {
+      return Promise.resolve([]);
+    }
+
     if (isFloatingWindow) {
       return listTasksByDate(getLocalDateKey(new Date()));
     }
 
     return listTasks();
-  }, [isFloatingWindow]);
+  }, [isFloatingWindow, isMascotWindow]);
 
   const refreshData = useCallback(async () => {
+    if (isMascotWindow) {
+      setTasks([]);
+      return;
+    }
+
     await postponeOverdueTasks(getLocalDateKey(new Date()));
     const [loadedTasks, loadedStats] = await Promise.all([loadTasksForCurrentWindow(), getDashboardSummary()]);
     setTasks(loadedTasks);
     setStats(loadedStats);
-  }, [loadTasksForCurrentWindow]);
+  }, [isMascotWindow, loadTasksForCurrentWindow]);
 
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
 
   useEffect(() => {
+    if (isMascotWindow) {
+      setIsLoading(false);
+      return undefined;
+    }
+
     let cancelled = false;
 
     async function loadData() {
@@ -235,9 +262,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadTasksForCurrentWindow]);
+  }, [isMascotWindow, loadTasksForCurrentWindow]);
 
   useEffect(() => {
+    if (isMascotWindow) {
+      return undefined;
+    }
+
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
@@ -259,10 +290,36 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [refreshData]);
+  }, [isMascotWindow, refreshData]);
 
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (!isMascotWindow) {
+      return undefined;
+    }
+
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void listen<MascotReaction>(MASCOT_REACTION_EVENT, (event) => {
+      if (event.payload?.type) {
+        setMascotReaction(event.payload);
+      }
+    }).then((dispose) => {
+      if (cancelled) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [isMascotWindow]);
+
+  useEffect(() => {
+    if (isAuxiliaryWindow) {
       return undefined;
     }
 
@@ -295,10 +352,10 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [isFloatingWindow]);
+  }, [isAuxiliaryWindow]);
 
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (isAuxiliaryWindow) {
       return;
     }
 
@@ -320,10 +377,10 @@ export default function App() {
       cancelled = true;
       unlistenResize?.();
     };
-  }, [isFloatingWindow]);
+  }, [isAuxiliaryWindow]);
 
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (isAuxiliaryWindow) {
       return;
     }
 
@@ -340,10 +397,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isFloatingWindow]);
+  }, [isAuxiliaryWindow]);
 
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (isAuxiliaryWindow) {
       return;
     }
 
@@ -357,6 +414,19 @@ export default function App() {
     root.style.setProperty("--primary-soft-strong", rgbaFromHex(mainThemeColor, 0.18));
     window.localStorage.setItem(MAIN_THEME_COLOR_KEY, mainThemeColor);
   }, [isFloatingWindow, mainThemeColor]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === MAIN_THEME_COLOR_KEY && event.newValue) {
+        setMainThemeColor(event.newValue);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   const handleMainThemeColorChange = useCallback((color: string) => {
     const normalized = color.trim();
@@ -372,6 +442,12 @@ export default function App() {
 
   const notifyTasksUpdated = useCallback(async () => {
     await emit(TASKS_UPDATED_EVENT, { source: windowRef.current.label } satisfies TasksUpdatedEventPayload);
+  }, []);
+
+  const triggerMascotReaction = useCallback((type: MascotReactionType) => {
+    const nextReaction: MascotReaction = { type, token: Date.now() };
+    setMascotReaction(nextReaction);
+    void emit(MASCOT_REACTION_EVENT, nextReaction);
   }, []);
 
   const ensureNotificationPermission = useCallback(async () => {
@@ -413,8 +489,24 @@ export default function App() {
     }
   }, [ensureNotificationPermission]);
 
+  const sendBreakReminder = useCallback(async () => {
+    triggerMascotReaction("break-reminder");
+
+    try {
+      const { isPermissionGranted, sendNotification } = await import("@tauri-apps/plugin-notification");
+      if (await isPermissionGranted()) {
+        sendNotification({
+          title: "久坐提醒",
+          body: "你已经坐久了，起身活动一下，顺手喝口水吧。",
+        });
+      }
+    } catch {
+      // 静默失败，避免打断定时提醒节奏
+    }
+  }, [triggerMascotReaction]);
+
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (isAuxiliaryWindow) {
       return;
     }
 
@@ -433,10 +525,10 @@ export default function App() {
     if (changed) {
       persistNotifiedReminderKeys(notifiedReminderKeysRef.current);
     }
-  }, [isFloatingWindow, tasks]);
+  }, [isAuxiliaryWindow, tasks]);
 
   useEffect(() => {
-    if (isFloatingWindow) {
+    if (isAuxiliaryWindow) {
       return;
     }
 
@@ -497,9 +589,58 @@ export default function App() {
         window.clearTimeout(timerId);
       }
     };
-  }, [isFloatingWindow, sendTaskReminder, tasks]);
+  }, [isAuxiliaryWindow, sendTaskReminder, tasks]);
 
   useEffect(() => {
+    if (isAuxiliaryWindow) {
+      return;
+    }
+
+    let cancelled = false;
+    let timerId: number | undefined;
+
+    const scheduleBreakReminder = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+        timerId = undefined;
+      }
+
+      const elapsed = Date.now() - breakReminderLastAtRef.current;
+      const delay = Math.max(BREAK_REMINDER_INTERVAL_MS - elapsed, 1000);
+
+      timerId = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+
+        breakReminderLastAtRef.current = Date.now();
+        void sendBreakReminder().finally(() => {
+          if (!cancelled) {
+            scheduleBreakReminder();
+          }
+        });
+      }, delay);
+    };
+
+    scheduleBreakReminder();
+
+    return () => {
+      cancelled = true;
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [isAuxiliaryWindow, sendBreakReminder]);
+
+  useEffect(() => {
+    if (isMascotWindow) {
+      return undefined;
+    }
+
     let cancelled = false;
     let timerId: number | undefined;
 
@@ -535,7 +676,7 @@ export default function App() {
         window.clearTimeout(timerId);
       }
     };
-  }, [isFloatingWindow, notifyTasksUpdated, refreshData]);
+  }, [isFloatingWindow, isMascotWindow, notifyTasksUpdated, refreshData]);
 
   const openCreateTaskModal = useCallback(() => {
     setTaskModalMode("create");
@@ -581,7 +722,7 @@ export default function App() {
           : prev.delayedCount,
       }));
       if (nextCompleted) {
-        setMascotReaction({ type: "task-completed", token: Date.now() });
+        triggerMascotReaction("task-completed");
       }
       await notifyTasksUpdated();
     } catch (error) {
@@ -594,18 +735,18 @@ export default function App() {
       });
       setErrorMessage(error instanceof Error ? error.message : "任务状态更新失败");
     }
-  }, [notifyTasksUpdated]);
+  }, [notifyTasksUpdated, triggerMascotReaction]);
 
   const handleDeleteTask = useCallback(async (id: string) => {
     try {
       await deleteTask(id);
       await refreshData();
-      setMascotReaction({ type: "task-deleted", token: Date.now() });
+      triggerMascotReaction("task-deleted");
       await notifyTasksUpdated();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "任务删除失败");
     }
-  }, [refreshData, notifyTasksUpdated]);
+  }, [refreshData, notifyTasksUpdated, triggerMascotReaction]);
 
   const handleAddTask = useCallback(async (newTask: TaskDraft) => {
     try {
@@ -630,9 +771,9 @@ export default function App() {
 
       await refreshData();
       if (isEditing) {
-        setMascotReaction({ type: "task-updated", token: Date.now() });
+        triggerMascotReaction("task-updated");
       } else {
-        setMascotReaction({ type: "task-added", token: Date.now() });
+        triggerMascotReaction("task-added");
       }
       await notifyTasksUpdated();
       setErrorMessage(reminderNotice);
@@ -641,7 +782,7 @@ export default function App() {
       setErrorMessage(message);
       throw error instanceof Error ? error : new Error(message);
     }
-  }, [taskModalMode, editingTask, ensureNotificationPermission, refreshData, notifyTasksUpdated]);
+  }, [taskModalMode, editingTask, ensureNotificationPermission, refreshData, notifyTasksUpdated, triggerMascotReaction]);
 
   const completedCount = stats.completedCount;
   const totalCount = stats.totalCount;
@@ -700,22 +841,29 @@ export default function App() {
 
     await clearTasks();
     await refreshData();
-    setMascotReaction({ type: "tasks-cleared", token: Date.now() });
+    triggerMascotReaction("tasks-cleared");
     await notifyTasksUpdated();
     await message("所有任务已清空。", { title: "已完成", kind: "info" });
-  }, [refreshData, notifyTasksUpdated]);
+  }, [refreshData, notifyTasksUpdated, triggerMascotReaction]);
 
   const handleSeedExamples = useCallback(async () => {
     await seedExampleTasks();
     await refreshData();
-    setMascotReaction({ type: "examples-loaded", token: Date.now() });
+    triggerMascotReaction("examples-loaded");
     await notifyTasksUpdated();
     await message("示例任务已经载入。", { title: "初始化完成", kind: "info" });
-  }, [refreshData, notifyTasksUpdated]);
+  }, [refreshData, notifyTasksUpdated, triggerMascotReaction]);
 
   const checkForUpdates = useCallback(async (silent = false) => {
+    let updateFlowStarted = false;
+
     if (!silent) {
       setIsCheckingUpdates(true);
+      setUpdateProgress({
+        phase: "checking",
+        downloadedBytes: 0,
+        message: "正在连接 GitHub Releases，检查是否有新版本...",
+      });
     }
 
     try {
@@ -727,9 +875,23 @@ export default function App() {
 
       if (!update) {
         if (!silent) {
+          setUpdateProgress({
+            phase: "done",
+            downloadedBytes: 0,
+            message: "当前已经是最新版本。",
+          });
           await message("当前已经是最新版本。", { title: "检查更新", kind: "info" });
         }
         return;
+      }
+
+      if (!silent) {
+        setUpdateProgress({
+          phase: "available",
+          version: update.version,
+          downloadedBytes: 0,
+          message: `发现新版本 ${update.version}，等待确认更新。`,
+        });
       }
 
       const accepted = await confirm(`发现新版本 ${update.version}，是否立即下载安装？`, {
@@ -740,18 +902,94 @@ export default function App() {
       });
 
       if (!accepted) {
+        if (!silent) {
+          setUpdateProgress(IDLE_UPDATE_PROGRESS);
+        }
         return;
       }
 
-      await update.downloadAndInstall();
+      updateFlowStarted = true;
+      setIsCheckingUpdates(true);
+      setIsToolsModalOpen(true);
+
+      let downloadedBytes = 0;
+      let totalBytes: number | undefined;
+
+      setUpdateProgress({
+        phase: "downloading",
+        version: update.version,
+        downloadedBytes,
+        totalBytes,
+        message: `正在下载 ${update.version} 更新包...`,
+      });
+
+      await update.download((event: DownloadEvent) => {
+        if (event.event === "Started") {
+          totalBytes = event.data.contentLength && event.data.contentLength > 0 ? event.data.contentLength : undefined;
+          downloadedBytes = 0;
+          setUpdateProgress({
+            phase: "downloading",
+            version: update.version,
+            downloadedBytes,
+            totalBytes,
+            message: totalBytes ? "已开始下载更新包。" : "已开始下载更新包，正在获取文件大小...",
+          });
+          return;
+        }
+
+        if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          setUpdateProgress({
+            phase: "downloading",
+            version: update.version,
+            downloadedBytes,
+            totalBytes,
+            message: "正在下载更新包...",
+          });
+          return;
+        }
+
+        downloadedBytes = totalBytes ?? downloadedBytes;
+        setUpdateProgress({
+          phase: "downloading",
+          version: update.version,
+          downloadedBytes,
+          totalBytes,
+          message: "下载完成，正在准备安装...",
+        });
+      });
+
+      setUpdateProgress({
+        phase: "installing",
+        version: update.version,
+        downloadedBytes,
+        totalBytes,
+        message: "正在安装更新包，请不要关闭应用...",
+      });
+
+      await update.install();
+
+      setUpdateProgress({
+        phase: "restarting",
+        version: update.version,
+        downloadedBytes,
+        totalBytes,
+        message: "更新安装完成，正在重启应用...",
+      });
       await message("更新安装完成，应用将自动重启。", { title: "更新完成", kind: "info" });
       await relaunch();
     } catch (error) {
-      if (!silent) {
-        await message(getErrorMessage(error, "检查更新失败"), { title: "检查更新失败", kind: "error" });
+      if (!silent || updateFlowStarted) {
+        const details = getErrorMessage(error, "检查更新失败");
+        setUpdateProgress({
+          phase: "error",
+          downloadedBytes: 0,
+          message: details,
+        });
+        await message(details, { title: "检查更新失败", kind: "error" });
       }
     } finally {
-      if (!silent) {
+      if (!silent || updateFlowStarted) {
         setIsCheckingUpdates(false);
       }
     }
@@ -773,7 +1011,7 @@ export default function App() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [checkForUpdates, isFloatingWindow]);
+  }, [checkForUpdates, isAuxiliaryWindow]);
 
   const moveFloatingWindowToCorner = useCallback(async (floatingWindow: WebviewWindow) => {
     const [monitorList, activeMonitor] = await Promise.all([
@@ -796,6 +1034,29 @@ export default function App() {
     const targetY = workArea.position.y + workArea.size.height - size.height - margin;
 
     await floatingWindow.setPosition(new PhysicalPosition(targetX, targetY));
+  }, []);
+
+  const moveMascotWindowToCorner = useCallback(async (mascotWindow: WebviewWindow) => {
+    const [monitorList, activeMonitor] = await Promise.all([
+      availableMonitors(),
+      currentMonitor(),
+    ]);
+    const targetMonitor = activeMonitor ?? monitorList[0];
+
+    if (!targetMonitor) {
+      return;
+    }
+
+    const size = await mascotWindow.outerSize();
+    const workArea = targetMonitor.workArea ?? {
+      position: targetMonitor.position,
+      size: targetMonitor.size,
+    };
+    const margin = 52;
+    const targetX = workArea.position.x + workArea.size.width - size.width - margin;
+    const targetY = workArea.position.y + workArea.size.height - size.height - margin;
+
+    await mascotWindow.setPosition(new PhysicalPosition(targetX, targetY));
   }, []);
 
   const handleOpenFloatingWindow = useCallback(async () => {
@@ -862,6 +1123,61 @@ export default function App() {
     }
   }, [moveFloatingWindowToCorner]);
 
+  const handleOpenMascotWindow = useCallback(async () => {
+    try {
+      const existingWindow = await WebviewWindow.getByLabel("mascot");
+
+      if (existingWindow) {
+        await existingWindow.setSkipTaskbar(true);
+        await existingWindow.setAlwaysOnTop(true);
+        await existingWindow.setResizable(false);
+        await existingWindow.setMaximizable(false);
+        await moveMascotWindowToCorner(existingWindow);
+        await existingWindow.show();
+        await existingWindow.setFocus();
+        return;
+      }
+
+      const mascotWindow = new WebviewWindow("mascot", {
+        title: "像素桌宠",
+        url: "/?mascot=1",
+        width: 176,
+        height: 218,
+        minWidth: 156,
+        minHeight: 188,
+        resizable: false,
+        maximizable: false,
+        minimizable: false,
+        decorations: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        center: false,
+        transparent: true,
+        shadow: false,
+      });
+
+      mascotWindow.once("tauri://created", () => {
+        void (async () => {
+          await mascotWindow.setSkipTaskbar(true);
+          await mascotWindow.setAlwaysOnTop(true);
+          await mascotWindow.setResizable(false);
+          await mascotWindow.setMaximizable(false);
+          await moveMascotWindowToCorner(mascotWindow);
+          await mascotWindow.show();
+          await mascotWindow.setFocus();
+        })().catch((error) => {
+          setErrorMessage(getErrorMessage(error, "桌面人物打开失败"));
+        });
+      });
+
+      mascotWindow.once("tauri://error", (event) => {
+        setErrorMessage(getErrorMessage(event.payload, "桌面人物打开失败"));
+      });
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "桌面人物打开失败"));
+    }
+  }, [moveMascotWindowToCorner]);
+
   const handleMinimizeMainWindow = useCallback(async () => {
     await windowRef.current.minimize();
   }, []);
@@ -880,6 +1196,14 @@ export default function App() {
   const handleCloseMainWindow = useCallback(async () => {
     await windowRef.current.close();
   }, []);
+
+  if (isMascotWindow) {
+    return (
+      <Suspense fallback={null}>
+        <DesktopMascot reaction={mascotReaction} themeColor={mainThemeColor} />
+      </Suspense>
+    );
+  }
 
   if (isFloatingWindow) {
     return (
@@ -964,6 +1288,15 @@ export default function App() {
                       title="打开浮窗"
                     >
                       <PanelTopOpen className="h-4 w-4" />
+                    </button>
+
+                    <button
+                      onClick={() => void handleOpenMascotWindow()}
+                      className="rounded-lg p-1.5 transition-transform hover:scale-105 hover:bg-muted active:scale-95"
+                      title="放到桌面"
+                      aria-label="放到桌面"
+                    >
+                      <Sparkles className="h-4 w-4" />
                     </button>
 
                     <button
@@ -1150,6 +1483,7 @@ export default function App() {
             mainThemeColor={mainThemeColor}
             onMainThemeColorChange={handleMainThemeColorChange}
             isCheckingUpdates={isCheckingUpdates}
+            updateProgress={updateProgress}
             taskCount={stats.totalCount}
           />
         </Suspense>

@@ -1,4 +1,5 @@
-import { ArchiveRestore, Database, Download, Palette, RefreshCw, Trash2, Wand2, X } from "lucide-react";
+import { AlertCircle, ArchiveRestore, CheckCircle2, Database, Download, Loader2, Palette, RefreshCw, Trash2, Wand2, X } from "lucide-react";
+import type { UpdateProgressPhase, UpdateProgressState } from "../types";
 
 interface ToolsModalProps {
   isOpen: boolean;
@@ -11,7 +12,60 @@ interface ToolsModalProps {
   mainThemeColor: string;
   onMainThemeColorChange: (color: string) => void;
   isCheckingUpdates: boolean;
+  updateProgress: UpdateProgressState;
   taskCount: number;
+}
+
+const updatePhaseText: Record<UpdateProgressPhase, string> = {
+  idle: "等待检查",
+  checking: "检查中",
+  available: "发现更新",
+  downloading: "下载中",
+  installing: "安装中",
+  restarting: "重启中",
+  done: "已完成",
+  error: "更新失败",
+};
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getOverallUpdatePercent(phase: UpdateProgressPhase, downloadPercent: number | null) {
+  if (phase === "checking") {
+    return 12;
+  }
+
+  if (phase === "available") {
+    return 22;
+  }
+
+  if (phase === "downloading") {
+    return downloadPercent === null ? 48 : Math.min(84, 25 + Math.round(downloadPercent * 0.58));
+  }
+
+  if (phase === "installing") {
+    return 92;
+  }
+
+  if (phase === "restarting" || phase === "done" || phase === "error") {
+    return 100;
+  }
+
+  return 0;
 }
 
 export function ToolsModal({
@@ -25,13 +79,28 @@ export function ToolsModal({
   mainThemeColor,
   onMainThemeColorChange,
   isCheckingUpdates,
+  updateProgress,
   taskCount,
 }: ToolsModalProps) {
   const mainColorPresets = ["#FF6B6B", "#2563EB", "#14B8A6", "#F97316", "#8B5CF6", "#10B981"];
+  const updateTotalBytes = updateProgress.totalBytes && updateProgress.totalBytes > 0 ? updateProgress.totalBytes : undefined;
+  const updateDownloadedBytes = Math.min(updateProgress.downloadedBytes, updateTotalBytes ?? updateProgress.downloadedBytes);
+  const downloadPercent = updateTotalBytes ? Math.min(100, Math.round((updateDownloadedBytes / updateTotalBytes) * 100)) : null;
+  const overallPercent = getOverallUpdatePercent(updateProgress.phase, downloadPercent);
+  const isUpdateProgressVisible = updateProgress.phase !== "idle";
+  const isUpdateError = updateProgress.phase === "error";
+  const isUpdateDone = updateProgress.phase === "done";
+  const isUpdateWorking = isCheckingUpdates && !isUpdateError && !isUpdateDone;
+  const UpdateStatusIcon = isUpdateError ? AlertCircle : isUpdateDone ? CheckCircle2 : Loader2;
+  const downloadProgressText = updateTotalBytes
+    ? `${formatBytes(updateDownloadedBytes)} / ${formatBytes(updateTotalBytes)}${downloadPercent === null ? "" : ` (${downloadPercent}%)`}`
+    : updateProgress.downloadedBytes > 0
+      ? `${formatBytes(updateProgress.downloadedBytes)} 已下载`
+      : "准备中";
   const actions = [
     {
-      title: isCheckingUpdates ? "正在检查更新" : "检查在线更新",
-      description: "从 GitHub Releases 获取最新版本，发现更新后可自动下载安装。",
+      title: isCheckingUpdates ? "更新进行中" : "检查在线更新",
+      description: "从 GitHub Releases 获取最新版本，并显示下载与安装进度。",
       icon: RefreshCw,
       action: onCheckUpdates,
       disabled: isCheckingUpdates,
@@ -91,6 +160,69 @@ export function ToolsModal({
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-3">
+              {isUpdateProgressVisible && (
+                <div
+                  className={`mb-3 rounded-xl border p-3.5 ${
+                    isUpdateError
+                      ? "border-destructive/25 bg-destructive/5 text-destructive"
+                      : "border-primary/20 bg-primary/5 text-foreground"
+                  }`}
+                >
+                  <div className="mb-3 flex items-start gap-2.5">
+                    <div
+                      className={`rounded-lg p-2 ${
+                        isUpdateError ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"
+                      }`}
+                    >
+                      <UpdateStatusIcon className={`h-4 w-4 ${isUpdateWorking ? "animate-spin" : ""}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[14px] font-medium">{updatePhaseText[updateProgress.phase]}</p>
+                        {updateProgress.version && (
+                          <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-muted-foreground">
+                            v{updateProgress.version}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{updateProgress.message}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>下载进度</span>
+                        <span>{downloadProgressText}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white">
+                        <div
+                          className={`h-full rounded-full bg-primary transition-all duration-300 ${
+                            updateProgress.phase === "downloading" && downloadPercent === null ? "w-1/2 animate-pulse" : ""
+                          }`}
+                          style={downloadPercent === null ? undefined : { width: `${downloadPercent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>更新进度</span>
+                        <span>{overallPercent}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            isUpdateError ? "bg-destructive" : "bg-primary"
+                          } ${updateProgress.phase === "checking" || updateProgress.phase === "installing" ? "animate-pulse" : ""}`}
+                          style={{ width: `${overallPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid gap-3 md:grid-cols-2">
                 {actions.map((item) => {
                   const Icon = item.icon;
@@ -111,7 +243,7 @@ export function ToolsModal({
                             item.destructive ? "bg-destructive/15 text-destructive" : "bg-primary/10 text-primary"
                           }`}
                         >
-                          <Icon className={`h-4.5 w-4.5 ${isCheckingUpdates && item.title.includes("正在检查") ? "animate-spin" : ""}`} />
+                          <Icon className={`h-4.5 w-4.5 ${isCheckingUpdates && item.title.includes("更新进行中") ? "animate-spin" : ""}`} />
                         </div>
                         <span className="text-[15px]">{item.title}</span>
                       </div>
